@@ -7,8 +7,10 @@
 #include "mc_blocks.h"
 #include "mc_move.h"
 #include "mc_classic.h"
+#include "mc_chars.h"
 
 #include <chrono>
+#include <vector>
 
 namespace mc
 {
@@ -16,6 +18,8 @@ extern void McItemFrame(CBasePlayer* pl);
 void TestAttackNow(CBasePlayer* pl);
 
 static cvar_t cv_testscript = {"mc_testscript", "", FCVAR_SERVER, 0.0f, nullptr};
+static cvar_t cv_testyaw = {"mc_test_yaw", "0", FCVAR_SERVER, 0.0f, nullptr}; // anim test: 90 turns the bots side-on
+static cvar_t cv_labturn = {"mc_lab_turn", "", FCVAR_SERVER, 0.0f, nullptr}; // lab: the bots' turn once the timeline is done
 static float g_testStart = -1.0f;
 static int g_testStep = 0;
 static char g_testName[64];
@@ -24,6 +28,8 @@ void RegisterBspTest();
 void RegisterTestCvars()
 {
 	CVAR_REGISTER(&cv_testscript);
+	CVAR_REGISTER(&cv_testyaw);
+	CVAR_REGISTER(&cv_labturn);
 	RegisterBspTest();
 }
 
@@ -1320,6 +1326,454 @@ static void ScenarioTntBots(CBasePlayer* pl)
 		McLog("SHOT end");
 }
 
+// Characters and weapons: an enderman bot fires an AK (Minecraft model, gun pose, recoil, flash) and a
+// Counter-Strike-model bot draws and fires a bow (rifle stance, bow in the hand bone), in front of the player.
+extern void SetCharacter(CBasePlayer* pl, int c);
+void UpdatePlayerFlagsPublic(CBasePlayer* pl);
+extern void TestUse(CBasePlayer* pl, bool pressed, bool held, bool released);
+static CBasePlayer* g_animBot[2];
+static void ScenarioAnim(CBasePlayer* pl)
+{
+	pl->pev->takedamage = DAMAGE_NO;
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		g_animBot[0] = g_animBot[1] = nullptr;
+		int n = 0;
+		for (int i = 1; i <= gpGlobals->maxClients && n < 2; i++)
+		{
+			CBasePlayer* b = UTIL_PlayerByIndex(i);
+			if (b && b != pl && b->IsAlive() && b->IsBot() && MobOf(b) != MOB_CREEPER)
+				g_animBot[n++] = b;
+		}
+		if (n < 2)
+		{
+			McLog("test anim: need 2 bots, found %d", n);
+			return;
+		}
+		// in front of the player, side by side, facing them
+		UTIL_MakeVectors(Vector(0, pl->pev->angles.y, 0));
+		Vector f = gpGlobals->v_forward, r = gpGlobals->v_right;
+		for (int k = 0; k < 2; k++)
+		{
+			CBasePlayer* b = g_animBot[k];
+			Vector at = pl->pev->origin + f * 105.0f + r * (k ? 34.0f : -34.0f);
+			UTIL_SetOrigin(b->pev, at);
+			b->pev->velocity = g_vecZero;
+			b->pev->angles = b->pev->v_angle = Vector(0, pl->pev->angles.y + 180.0f, 0);
+			b->pev->fixangle = 1;
+		}
+		SetCharacter(g_animBot[0], 7); // enderman
+		g_animBot[0]->GiveNamedItem("weapon_ak47");
+		g_animBot[0]->GiveAmmo(90, "762Nato", 90);
+		g_animBot[0]->SelectItem("weapon_ak47");
+		SetCharacter(g_animBot[1], 0); // the team's Counter-Strike model
+		McPlayer& mp = P(g_animBot[1]);
+		mp.hotbar[mcp::FIRST_MC_SLOT].id = (uint16_t)mci::FindItem("bow");
+		mp.hotbar[mcp::FIRST_MC_SLOT].count = 1;
+		if (!g_animBot[1]->HasNamedPlayerItem("weapon_mcitem"))
+			g_animBot[1]->GiveNamedItem("weapon_mcitem");
+		SelectSlot(g_animBot[1], mcp::FIRST_MC_SLOT);
+		McLog("test anim: %s is an enderman with an AK, %s holds a bow", STRING(g_animBot[0]->pev->netname), STRING(g_animBot[1]->pev->netname));
+	}
+	if (!g_animBot[0] || !g_animBot[1])
+	{
+		if (Hit(2.0f))
+			McLog("SHOT end");
+		return;
+	}
+	for (int k = 0; k < 2; k++)
+	{
+		// frozen bots keep their own view: turn them to the player every frame
+		Vector to = pl->pev->origin - g_animBot[k]->pev->origin;
+		float yaw = atan2f(to.y, to.x) * 180.0f / (float)M_PI;
+		yaw += cv_testyaw.value; // 0 = face the player, 90 = side view
+		static_cast<CCSBot*>(g_animBot[k])->SetLookAngles(yaw, 0.0f);
+		g_animBot[k]->pev->v_angle = Vector(0, yaw, 0);
+		g_animBot[k]->pev->angles = Vector(0, yaw, 0);
+	}
+	if (Hit(1.4f))
+		McLog("SHOT anim_idle");
+	// the enderman fires a burst
+	for (int k = 0; k < 8; k++)
+		if (Hit(2.0f + k * 0.11f))
+		{
+			CBasePlayerWeapon* w = (CBasePlayerWeapon*)(CBasePlayerItem*)g_animBot[0]->m_pActiveItem;
+			if (w)
+			{
+				w->m_flNextPrimaryAttack = 0.0f;
+				w->PrimaryAttack();
+			}
+		}
+	if (Hit(2.25f))
+		McLog("SHOT anim_ak_burst");
+	// the CS bot draws the bow, holds it, lets go
+	if (Hit(3.0f))
+		TestUse(g_animBot[1], true, true, false);
+	if (Hit(3.9f))
+		McLog("SHOT anim_bow_drawn");
+	if (Hit(4.4f))
+	{
+		TestUse(g_animBot[1], false, false, true);
+		McLog("test anim: bow released, anim ext %s", g_animBot[1]->m_szAnimExtention);
+	}
+	if (Hit(4.5f))
+		McLog("SHOT anim_bow_shot");
+	if (Hit(5.2f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 0.0f);
+		McLog("SHOT end");
+	}
+}
+
+// Test lab: a lineup of frozen bots, each a different character holding a different weapon, with the
+// player floating in noclip in front of them. The camera stays put while the bots turn on the spot (front,
+// side, other side, back, three-quarter), so each screenshot shows every model from the same angle; then
+// they fire for a shot of the recoil, and the camera visits a few of them up close. After the timeline the
+// lab stays up (bots pinned, noclip) for a look around.
+struct LabSlot
+{
+	int character;      // mcp::kCharacters
+	const char* weapon; // weapon_<cs gun>, or mc:<Minecraft item>
+};
+static const LabSlot kLab[] = {
+	{7, "weapon_ak47"},   // enderman
+	{3, "weapon_m4a1"},   // zombie
+	{1, "weapon_awp"},    // Steve
+	{2, "weapon_deagle"}, // Alex
+	{4, "weapon_elite"},  // husk, a pistol in each hand
+	{5, "weapon_knife"},  // drowned
+	{15, "mc:bow"},       // SEAL Team 6 drawing a bow
+	{19, "mc:crossbow"},  // Phoenix Connexion with a loaded crossbow
+};
+static const int LAB_N = (int)(sizeof(kLab) / sizeof(kLab[0]));
+static CBasePlayer* g_labBot[LAB_N];
+static Vector g_labPos[LAB_N];
+static int g_labCount = 0;
+static float g_labYaw = 0.0f, g_labTurn = 0.0f;
+static Vector g_labCenter, g_labCam;
+
+static float FloorBelow(const Vector& at, edict_t* ignore)
+{
+	TraceResult tr;
+	UTIL_TraceLine(at + Vector(0, 0, 40), at - Vector(0, 0, 200), ignore_monsters, ignore, &tr);
+	return tr.vecEndPos.z;
+}
+
+static void LabCamera(CBasePlayer* pl, const Vector& eye, const Vector& target)
+{
+	pl->pev->movetype = MOVETYPE_NOCLIP;
+	UTIL_SetOrigin(pl->pev, eye - pl->pev->view_ofs);
+	pl->pev->velocity = g_vecZero;
+	Look(pl, target);
+}
+
+static void LabFire(int k)
+{
+	CBasePlayer* b = g_labBot[k];
+	if (!b || !b->IsAlive())
+		return;
+	if (!strncmp(kLab[k].weapon, "mc:", 3))
+		return;
+	CBasePlayerWeapon* w = (CBasePlayerWeapon*)(CBasePlayerItem*)b->m_pActiveItem;
+	if (!w)
+		return;
+	w->m_iClip = max(w->m_iClip, 5);
+	w->m_flNextPrimaryAttack = 0.0f;
+	w->PrimaryAttack();
+}
+
+static void ScenarioLab(CBasePlayer* pl)
+{
+	pl->pev->takedamage = DAMAGE_NO;
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		CLIENT_COMMAND(pl->edict(), (char*)"r_drawviewmodel 0\n");
+		g_labCount = 0;
+		for (int i = 1; i <= gpGlobals->maxClients && g_labCount < LAB_N; i++)
+		{
+			CBasePlayer* b = UTIL_PlayerByIndex(i);
+			if (b && b != pl && b->IsAlive() && b->IsBot())
+				g_labBot[g_labCount++] = b;
+		}
+		if (!g_labCount)
+		{
+			McLog("test lab: no bots");
+			return;
+		}
+		// the spot: any spawn point, any of 16 directions. The row runs across the direction, the camera
+		// stands 190 units out along it; it must see both ends and the middle, on a floor without steps.
+		float half = (g_labCount - 1) * 22.0f + 24.0f;
+		float best = -1.0f;
+		std::vector<Vector> spots;
+		spots.push_back(pl->pev->origin);
+		for (int k = 0; k < g_labCount; k++)
+			spots.push_back(g_labBot[k]->pev->origin);
+		g_labCenter = pl->pev->origin;
+		for (const Vector& c : spots)
+		{
+			float floor = FloorBelow(c, pl->edict());
+			for (int k = 0; k < 16; k++)
+			{
+				float yaw = k * 22.5f;
+				UTIL_MakeVectors(Vector(0, yaw, 0));
+				Vector f = gpGlobals->v_forward, r = gpGlobals->v_right;
+				Vector chest(c.x, c.y, floor + 40.0f), cam = chest + f * 190.0f + Vector(0, 0, 22);
+				float room = 1.0f;
+				TraceResult tr;
+				UTIL_TraceLine(chest, cam, ignore_monsters, pl->edict(), &tr);
+				room = fminf(room, tr.flFraction);
+				for (int sgn = -1; sgn <= 1; sgn += 2)
+				{
+					Vector end = chest + r * (sgn * half);
+					UTIL_TraceLine(chest, end, ignore_monsters, pl->edict(), &tr);
+					room = fminf(room, tr.flFraction);
+					UTIL_TraceLine(cam, end, ignore_monsters, pl->edict(), &tr);
+					room = fminf(room, tr.flFraction);
+				}
+				// every slot on the same floor (no steps, no drops)
+				for (int j = 0; j < g_labCount; j++)
+				{
+					Vector at = chest + r * ((j - (g_labCount - 1) * 0.5f) * 44.0f);
+					if (fabsf(FloorBelow(at, pl->edict()) - floor) > 6.0f)
+					{
+						room *= 0.3f;
+						break;
+					}
+				}
+				if (room > best + 0.001f)
+				{
+					best = room;
+					g_labYaw = yaw;
+					g_labCenter = Vector(c.x, c.y, floor + 37.0f);
+				}
+			}
+		}
+		McLog("test lab: spot (%.0f %.0f %.0f) yaw %.1f, clear %.2f", g_labCenter.x, g_labCenter.y, g_labCenter.z, g_labYaw, best);
+		UTIL_MakeVectors(Vector(0, g_labYaw, 0));
+		Vector f = gpGlobals->v_forward, r = gpGlobals->v_right;
+		for (int k = 0; k < g_labCount; k++)
+		{
+			CBasePlayer* b = g_labBot[k];
+			Vector at = g_labCenter + r * ((k - (g_labCount - 1) * 0.5f) * 44.0f);
+			at.z = FloorBelow(at, b->edict()) + 37.0f;
+			g_labPos[k] = at;
+			UTIL_SetOrigin(b->pev, at);
+			b->pev->velocity = g_vecZero;
+			b->pev->takedamage = DAMAGE_NO; // the knife next door slashes too
+			SetCharacter(b, kLab[k].character);
+			b->RemoveAllItems(FALSE);
+			McPlayer& gear = P(b);
+			for (int i = 0; i < mci::NUM_ARMOR_SLOTS; i++)
+				gear.armor[i] = mci::Stack();
+			UpdatePlayerFlagsPublic(b);
+			b->GiveNamedItem("weapon_knife");
+			const char* wpn = kLab[k].weapon;
+			if (!strncmp(wpn, "mc:", 3))
+			{
+				McPlayer& mp = P(b);
+				mp.hotbar[mcp::FIRST_MC_SLOT].id = (uint16_t)mci::FindItem(wpn + 3);
+				mp.hotbar[mcp::FIRST_MC_SLOT].count = 1;
+				if (!b->HasNamedPlayerItem("weapon_mcitem"))
+					b->GiveNamedItem("weapon_mcitem");
+				SelectSlot(b, mcp::FIRST_MC_SLOT);
+				TestUse(b, true, true, false); // draw the bow / start loading the crossbow
+			}
+			else
+			{
+				if (strcmp(wpn, "weapon_knife"))
+					b->GiveNamedItem(wpn);
+				b->SelectItem(wpn);
+			}
+			McLog("test lab: slot %d %s is %s with %s (team %d)", k, STRING(b->pev->netname), mcp::kCharacters[kLab[k].character].name, wpn,
+				b->m_iTeam);
+		}
+		g_labTurn = 0.0f;
+		g_labCam = g_labCenter + f * 190.0f;
+		g_labCam.z = g_labCenter.z + 25.0f;
+	}
+	if (!g_labCount)
+	{
+		if (Hit(2.0f))
+			McLog("SHOT end");
+		return;
+	}
+	float now = gpGlobals->time - g_testStart;
+	// the crossbow is loaded once charged (1.25 s): let go
+	if (Hit(2.0f))
+		for (int k = 0; k < g_labCount; k++)
+			if (!strcmp(kLab[k].weapon, "mc:crossbow"))
+				TestUse(g_labBot[k], false, false, true);
+	// pin everyone: the bots where they stand, turned by the timeline; the player on the camera
+	if (now > 26.0f && cv_labturn.string[0])
+		g_labTurn = cv_labturn.value;
+	for (int k = 0; k < g_labCount; k++)
+	{
+		CBasePlayer* b = g_labBot[k];
+		if (!b->IsAlive())
+			continue;
+		Vector o = b->pev->origin;
+		o.x = g_labPos[k].x;
+		o.y = g_labPos[k].y;
+		UTIL_SetOrigin(b->pev, o);
+		b->pev->velocity.x = b->pev->velocity.y = 0.0f;
+		b->pev->takedamage = DAMAGE_NO;
+		float yaw = g_labYaw + g_labTurn;
+		static_cast<CCSBot*>(b)->SetLookAngles(yaw, 0.0f);
+		b->pev->v_angle = b->pev->angles = Vector(0, yaw, 0);
+	}
+	Vector chest = g_labCenter;
+	chest.z = g_labCam.z - 22.0f;
+	if (Hit(1.0f))
+		LabCamera(pl, g_labCam, chest);
+	pl->pev->movetype = MOVETYPE_NOCLIP;
+	pl->pev->velocity = g_vecZero;
+	pl->pev->viewmodel = 0; // no first-person gun in the pictures
+	// the bots turn: facing the camera, their left side, their right side, their back, three-quarter
+	struct View
+	{
+		float turn;
+		const char* shot;
+	};
+	static const View views[] = {{0, "lab_front"}, {90, "lab_left"}, {-90, "lab_right"}, {180, "lab_back"}, {35, "lab_34"}};
+	for (int v = 0; v < 5; v++)
+	{
+		float t0 = 1.4f + v * 2.2f;
+		if (Hit(t0))
+			g_labTurn = views[v].turn;
+		if (Hit(t0 + 1.0f))
+			McLog("SHOT %s", views[v].shot);
+	}
+	// everyone fires (three-quarter view)
+	float tf = 1.4f + 5 * 2.2f;
+	for (int n = 0; n < 10; n++)
+		if (Hit(tf + n * 0.1f))
+			for (int k = 0; k < g_labCount; k++)
+				LabFire(k);
+	if (Hit(tf + 0.55f))
+		McLog("SHOT lab_fire");
+	// close-ups: the bots face the main camera; this camera stands in front of one, off to its right
+	// (the enderman twice: from the front and from its left)
+	static const int close[] = {0, 0, 4, 6, 7};
+	if (Hit(tf + 1.6f))
+		g_labTurn = 0.0f;
+	for (int c = 0; c < 5; c++)
+	{
+		int k = close[c];
+		float t0 = tf + 1.8f + c * 2.2f;
+		if (k >= g_labCount)
+			continue;
+		if (Hit(t0))
+		{
+			UTIL_MakeVectors(Vector(0, g_labYaw, 0));
+			Vector at = g_labPos[k];
+			at.z = g_labBot[k]->pev->origin.z;
+			Vector eye = c == 1 ? at - gpGlobals->v_right * 85.0f + gpGlobals->v_forward * 10.0f
+							   : at + gpGlobals->v_forward * 72.0f + gpGlobals->v_right * 30.0f;
+			eye.z = at.z + 16.0f;
+			LabCamera(pl, eye, at + Vector(0, 0, 6));
+		}
+		if (Hit(t0 + 0.4f))
+			LabFire(k);
+		if (Hit(t0 + 0.8f))
+			McLog("SHOT lab_close_%d%s", k, c == 1 ? "_side" : "");
+	}
+	if (Hit(tf + 1.8f + 5 * 2.2f + 0.3f))
+	{
+		LabCamera(pl, g_labCam, chest);
+		McLog("SHOT end");
+	}
+}
+
+// The C4 as a giant TNT, and the round restart after it: a bomb planted on a bombsite with the shortest
+// timer (bots frozen), watched from above, with blocks placed and items dropped next to it beforehand.
+// After the blast and the restart that follows the Terrorist win, the site must be whole again and no
+// Minecraft thing left lying around.
+size_t ChangedCells(); // mc_world_srv.cpp
+static Vector g_bombAt, g_bombCam;
+int CountOrRemoveMcEntities(bool remove); // mc_main.cpp
+static int CountMcEntities() { return CountOrRemoveMcEntities(false); }
+static void ScenarioBomb(CBasePlayer* pl)
+{
+	pl->pev->takedamage = DAMAGE_NO;
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		CVAR_SET_FLOAT("mp_c4timer", 10.0f);
+		CBaseEntity* site = UTIL_FindEntityByClassname(nullptr, "func_bomb_target");
+		Vector c = site ? (site->pev->absmin + site->pev->absmax) * 0.5f : pl->pev->origin;
+		TraceResult tr;
+		UTIL_TraceLine(c + Vector(0, 0, 64), c - Vector(0, 0, 512), ignore_monsters, nullptr, &tr);
+		g_bombAt = tr.vecEndPos + Vector(0, 0, 4);
+		// the camera: up and back, wherever it sees the bomb best
+		float best = -1.0f;
+		for (int k = 0; k < 16; k++)
+			for (int hgt = 0; hgt < 3; hgt++)
+			{
+				float yaw = k * 22.5f * (float)M_PI / 180.0f, up = hgt == 0 ? 380.0f : hgt == 1 ? 260.0f : 160.0f;
+				Vector cam = g_bombAt + Vector(cosf(yaw) * 560.0f, sinf(yaw) * 560.0f, up);
+				UTIL_TraceLine(g_bombAt + Vector(0, 0, 16), cam, ignore_monsters, nullptr, &tr);
+				if (tr.flFraction > best + 0.001f)
+				{
+					best = tr.flFraction;
+					g_bombCam = tr.vecEndPos - (cam - g_bombAt).Normalize() * 24.0f;
+				}
+			}
+		// placed blocks and dropped items beside the bomb: the restart must take them all away
+		int placed = 0;
+		for (int k = 0; k < 8; k++)
+		{
+			Vector p = g_bombAt + Vector(-140.0f + k * 40.0f, 120.0f, 20.0f);
+			int b[3];
+			g_world.ToBlock(p, b);
+			if (g_world.InBounds(b[0], b[1], b[2]))
+			{
+				SetBlock(b[0], b[1], b[2], mcw::MakeCell((uint16_t)mcw::FindBlock("cobblestone"), 0));
+				placed++;
+			}
+		}
+		for (int k = 0; k < 6; k++)
+		{
+			Vector p = g_bombAt + Vector(-100.0f + k * 40.0f, -110.0f, 30.0f);
+			SpawnItemEntity(p, mci::FindItem(k & 1 ? "diamond" : "tnt"), 1, nullptr);
+		}
+		McLog("test bomb: site at (%.0f %.0f %.0f), camera sees %.2f, %d blocks placed, %d Minecraft entities, %d changed cells",
+			g_bombAt.x, g_bombAt.y, g_bombAt.z, best, placed, CountMcEntities(), (int)ChangedCells());
+	}
+	// the camera holds through the round restart (which respawns the player)
+	pl->pev->movetype = MOVETYPE_NOCLIP;
+	pl->pev->velocity = g_vecZero;
+	pl->pev->viewmodel = 0;
+	float now = gpGlobals->time - g_testStart;
+	if (now >= 1.0f && (pl->pev->origin + pl->pev->view_ofs - g_bombCam).Length() > 4.0f)
+		LabCamera(pl, g_bombCam, g_bombAt);
+	if (Hit(1.3f))
+	{
+		CSGameRules()->m_iC4Timer = 10; // mp_c4timer only applies from the next round
+		CGrenade::ShootSatchelCharge(pl->pev, g_bombAt, Vector(0, 0, 0));
+		McLog("test bomb: planted, 10 s");
+	}
+	if (Hit(2.2f))
+		McLog("SHOT bomb_before");
+	if (Hit(11.6f))
+		McLog("SHOT bomb_boom");
+	if (Hit(13.4f))
+		McLog("SHOT bomb_crater");
+	if (Hit(15.2f))
+		McLog("SHOT bomb_ring");
+	if (Hit(20.0f))
+	{
+		McLog("test bomb: after the restart %d Minecraft entities, %d changed cells", CountMcEntities(), (int)ChangedCells());
+		McLog("SHOT bomb_reset");
+	}
+	if (Hit(21.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 0.0f);
+		McLog("SHOT end");
+	}
+}
+
 void TestMapChanged()
 {
 	g_testStart = -1.0f;
@@ -1393,6 +1847,12 @@ void TestFrame()
 		ScenarioHotbar(pl);
 	else if (!strcmp(name, "tntbots"))
 		ScenarioTntBots(pl);
+	else if (!strcmp(name, "anim"))
+		ScenarioAnim(pl);
+	else if (!strcmp(name, "lab"))
+		ScenarioLab(pl);
+	else if (!strcmp(name, "bomb"))
+		ScenarioBomb(pl);
 	g_prevNow = gpGlobals->time - g_testStart;
 }
 } // namespace mc

@@ -348,6 +348,8 @@ void OnServerDeactivate()
 }
 
 // Counter-Strike rounds vs Minecraft persistence: restore the map at round restart (mc_world_reset 1).
+size_t ChangedCells() { return g_changed.size(); }
+
 void ResetWorld()
 {
 	if (!g_worldLoaded || g_changed.empty())
@@ -405,10 +407,12 @@ void SendWorldToClient(edict_t* ent)
 
 static void FlushPending()
 {
-	for (size_t i = 0; i < g_pending.size(); i += 20)
+	// the C4 crater breaks thousands of cells at once: at most 10 messages a frame, the rest follow
+	size_t limit = min(g_pending.size(), (size_t)(10 * 20));
+	for (size_t i = 0; i < limit; i += 20)
 	{
 		MESSAGE_BEGIN(MSG_ALL, MsgVox());
-		size_t n = min((size_t)20, g_pending.size() - i);
+		size_t n = min((size_t)20, limit - i);
 		WRITE_BYTE((int)n);
 		for (size_t k = 0; k < n; k++)
 		{
@@ -419,7 +423,7 @@ static void FlushPending()
 		}
 		MESSAGE_END();
 	}
-	g_pending.clear();
+	g_pending.erase(g_pending.begin(), g_pending.begin() + limit);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1081,11 +1085,92 @@ void H_ExplodeHe(IReGameHook_CGrenade_ExplodeHeGrenade* chain, CGrenade* g, Trac
 	Explode(o, 3.0f, g, nullptr);
 }
 
+// The C4 is one enormous TNT: everything that can be blown up within mc_bomb_radius blocks goes (an
+// ellipsoid squashed to a bowl below the bomb, with a ragged rim), fireballs fill the site, and a ring of
+// primed TNT goes off around it over the next two seconds. The world comes back at the round restart.
+cvar_t g_cvBombRadius = {"mc_bomb_radius", "11", FCVAR_SERVER, 11.0f, nullptr};
+
+static void BombCrater(const Vector& at)
+{
+	float R = g_cvBombRadius.value;
+	if (!g_worldLoaded || R <= 0.0f)
+		return;
+	float o[3] = {(at.x - g_world.origin[0]) / B2U, (at.y - g_world.origin[1]) / B2U, (at.z - g_world.origin[2]) / B2U};
+	int r = (int)ceilf(R) + 1;
+	int cx = (int)floorf(o[0]), cy = (int)floorf(o[1]), cz = (int)floorf(o[2]);
+	int broken = 0, particles = 0;
+	for (int z = cz - r; z <= cz + r; z++)
+		for (int y = cy - r; y <= cy + r; y++)
+			for (int x = cx - r; x <= cx + r; x++)
+			{
+				if (!g_world.InBounds(x, y, z))
+					continue;
+				float dx = x + 0.5f - o[0], dy = y + 0.5f - o[1], dz = z + 0.5f - o[2];
+				if (dz < 0.0f)
+					dz *= 3.0f; // a bowl a third as deep as it is wide
+				uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u ^ (uint32_t)z * 83492791u;
+				h ^= h >> 13;
+				h *= 0x5bd1e995u;
+				h ^= h >> 15;
+				float edge = R * (0.8f + 0.2f * (float)(h & 1023) / 1023.0f);
+				if (dx * dx + dy * dy + dz * dz > edge * edge)
+					continue;
+				mcw::Cell c = g_world.Get(x, y, z);
+				if (g_classicMode && !c)
+				{
+					// the classic map itself
+					if (!g_classic.Diggable(x, y, z))
+						continue;
+					if (particles++ < 40)
+					{
+						mcw::Cell virt = mcw::MakeCell((uint16_t)mcc::CellBlockType(g_classic, x, y, z), 0);
+						FxParticles(mcp::PK_BLOCK_BREAK, BlockCenter(x, y, z), 8, virt);
+					}
+					SetBlock(x, y, z, mcw::MakeCell(g_classic.carvedType, 0));
+					broken++;
+					continue;
+				}
+				if (!c || (g_classicMode && mcw::CellType(c) == g_classic.carvedType))
+					continue;
+				const mcw::BlockDef& d = mcw::Block(mcw::CellType(c));
+				if (BlastResistance(d) > 100.0f)
+					continue; // bedrock, obsidian
+				mcw::Cell empty = (g_classicMode && (c & mcc::CARVED_FLAG)) ? mcw::MakeCell(g_classic.carvedType, 0) : 0;
+				if (d.flags & mcw::BF_EXPLOSIVE)
+				{
+					SetBlock(x, y, z, empty);
+					Vector bc = BlockCenter(x, y, z) - Vector(0, 0, 20);
+					PrimeTnt(bc, RANDOM_LONG(10, 40));
+					continue;
+				}
+				if (particles++ < 40)
+					FxParticles(mcp::PK_BLOCK_BREAK, BlockCenter(x, y, z), 8, c);
+				SetBlock(x, y, z, empty);
+				broken++;
+			}
+	// fireballs across the site, then the ring of TNT
+	for (int k = 0; k < 6; k++)
+	{
+		float a = RANDOM_FLOAT(0.0f, 6.2831853f), d = RANDOM_FLOAT(0.2f, 0.7f) * R * B2U;
+		Vector p = at + Vector(cosf(a) * d, sinf(a) * d, RANDOM_FLOAT(10.0f, 90.0f));
+		FxExplosion(p, 6.0f);
+	}
+	int ring = 8;
+	for (int k = 0; k < ring; k++)
+	{
+		float a = (k + RANDOM_FLOAT(0.0f, 0.6f)) * 6.2831853f / ring, d = RANDOM_FLOAT(0.55f, 0.9f) * R * B2U;
+		Vector p = at + Vector(cosf(a) * d, sinf(a) * d, 30.0f);
+		PrimeTnt(p, RANDOM_LONG(12, 50));
+	}
+	McLog("bomb: crater radius %.0f blocks, %d cells blown away, %d TNT around it", R, broken, ring);
+}
+
 void H_ExplodeBomb(IReGameHook_CGrenade_ExplodeBomb* chain, CGrenade* g, TraceResult* tr, int bits)
 {
 	Vector o = g->pev->origin;
 	chain->callNext(g, tr, bits);
 	Explode(o, 8.0f, g, nullptr);
+	BombCrater(o);
 }
 
 // ---------------------------------------------------------------------------------------------

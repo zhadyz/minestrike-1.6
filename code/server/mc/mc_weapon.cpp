@@ -116,9 +116,37 @@ static void Knockback(CBaseEntity* target, CBasePlayer* attacker, float strength
 	target->pev->flags &= ~FL_ONGROUND;
 }
 
+// Counter-Strike player models animate by the held weapon's "extension" (ref_aim_<ext>, ref_shoot_<ext>):
+// bows and crossbows are held like a rifle, melee tools like the knife, throwables like a grenade, and
+// blocks/food in front like the C4.
+static const char* AnimExtFor(const mci::Stack& s)
+{
+	if (s.Empty())
+		return "knife";
+	switch (mci::Item(s.id).type)
+	{
+	case mci::IT_BOW:
+	case mci::IT_CROSSBOW:
+		return "rifle";
+	case mci::IT_SWORD:
+	case mci::IT_AXE:
+	case mci::IT_PICKAXE:
+	case mci::IT_SHOVEL:
+	case mci::IT_MACE:
+		return "knife";
+	case mci::IT_PEARL:
+	case mci::IT_XP_BOTTLE:
+	case mci::IT_FIREWORK:
+		return "grenade";
+	default:
+		return "c4";
+	}
+}
+
 static void Attack(CBasePlayer* pl)
 {
 	AddExhaustion(pl, 0.1f); // Minecraft: every attack swing
+	pl->SetAnimation(PLAYER_ATTACK1); // the swing shows on the Counter-Strike model too
 	McPlayer& mp = P(pl);
 	const mci::Stack& held = HeldStack(pl);
 	const mci::ItemDef& def = held.Empty() ? mci::g_items[0] : mci::Item(held.id);
@@ -304,6 +332,7 @@ static void UseItem(CBasePlayer* pl, bool pressed, bool held, bool released)
 		if (pressed)
 		{
 			SpawnThrown(pl, mcp::MCE_PEARL, 1.5f);
+			pl->SetAnimation(PLAYER_ATTACK1);
 			ConsumeHeld(pl, 1);
 		}
 		break;
@@ -311,6 +340,7 @@ static void UseItem(CBasePlayer* pl, bool pressed, bool held, bool released)
 		if (pressed)
 		{
 			SpawnThrown(pl, mcp::MCE_XPBOTTLE, 0.7f);
+			pl->SetAnimation(PLAYER_ATTACK1);
 			ConsumeHeld(pl, 1);
 		}
 		break;
@@ -321,6 +351,7 @@ static void UseItem(CBasePlayer* pl, bool pressed, bool held, bool released)
 			if (pressed)
 			{
 				CBaseEntity* bolt = SpawnThrown(pl, mcp::MCE_ARROW, 3.15f);
+				pl->SetAnimation(PLAYER_ATTACK1); // the rifle fire animation
 				if (bolt)
 					bolt->pev->fuser1 = 1.0f;
 				g_xbowLoaded[idx] = false;
@@ -365,6 +396,7 @@ static void UseItem(CBasePlayer* pl, bool pressed, bool held, bool released)
 			if (power >= 0.1f)
 			{
 				CBaseEntity* arrow = SpawnThrown(pl, mcp::MCE_ARROW, power * 3.0f);
+				pl->SetAnimation(PLAYER_ATTACK1);
 				if (arrow && power >= 1.0f)
 					arrow->pev->fuser1 = 1.0f; // critical arrow
 				FxSound(mcs::MCS_ARROW_SHOOT, pl->pev->origin, 1.0f, 1.0f / (RANDOM_FLOAT(0.0f, 0.4f) + 1.2f) + power * 0.5f);
@@ -391,6 +423,11 @@ void McItemFrame(CBasePlayer* pl)
 {
 	if (!pl->IsAlive())
 		return;
+	{
+		const char* ext = AnimExtFor(HeldStack(pl));
+		if (strcmp(pl->m_szAnimExtention, ext))
+			Q_strlcpy(pl->m_szAnimExtention, ext);
+	}
 	int pressed = pl->m_afButtonPressed;
 	int released = pl->m_afButtonReleased;
 	int buttons = pl->pev->button;

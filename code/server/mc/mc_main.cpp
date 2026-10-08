@@ -504,7 +504,7 @@ static void UpdatePlayerFlags(CBasePlayer* pl)
 		if (pl->m_iKevlar == ARMOR_VESTHELM)
 			code |= 3;  // + iron helmet
 	}
-	pl->pev->playerclass = code;
+	pl->pev->playerclass = code | ((pl->m_iTeam & 3) << 12); // + team for the outline colour (1 T, 2 CT)
 }
 
 // Bots stop at iron: diamond and netherite (90% / 99% damage cut) would make them unkillable.
@@ -1411,6 +1411,33 @@ static void ShowPendingTeamMenus()
 	}
 }
 
+// Removes every Minecraft entity lying in the world (not the players' own state); returns how many.
+int CountOrRemoveMcEntities(bool remove)
+{
+	static const char* kinds[] = {"mc_item", "mc_xp_orb", "mc_tnt", "mc_projectile", "mc_falling_block", "mc_firework"};
+	int n = 0;
+	for (int i = gpGlobals->maxClients + 1; i < gpGlobals->maxEntities; i++)
+	{
+		edict_t* ed = INDEXENT(i);
+		if (!ed || ed->free || FStringNull(ed->v.classname) || (ed->v.flags & FL_KILLME))
+			continue;
+		const char* cn = STRING(ed->v.classname);
+		if (strncmp(cn, "mc_", 3))
+			continue;
+		for (const char* k : kinds)
+			if (!strcmp(cn, k))
+			{
+				CBaseEntity* e = CBaseEntity::Instance(ed);
+				if (remove && e)
+					UTIL_Remove(e);
+				n++;
+				break;
+			}
+	}
+	return n;
+}
+static int RemoveMcEntities() { return CountOrRemoveMcEntities(true); }
+
 static void H_RestartRound(IReGameHook_CSGameRules_RestartRound* chain)
 {
 	chain->callNext();
@@ -1433,18 +1460,9 @@ static void H_RestartRound(IReGameHook_CSGameRules_RestartRound* chain)
 	if (cv_worldReset.value != 0.0f)
 		ResetWorld();
 	// Minecraft things lying around (items, XP orbs, primed TNT, arrows, falling blocks) are cleared with
-	// the round, like Counter-Strike clears dropped guns
-	static const char* kinds[] = {"mc_item", "mc_xp_orb", "mc_tnt", "mc_projectile", "mc_falling_block", "mc_firework"};
-	int removed = 0;
-	for (const char* k : kinds)
-	{
-		CBaseEntity* e = nullptr;
-		while ((e = UTIL_FindEntityByClassname(e, k)) != nullptr)
-		{
-			UTIL_Remove(e);
-			removed++;
-		}
-	}
+	// the round, like Counter-Strike clears dropped guns. ReGameDLL finds entities by classname through a
+	// hash that only map-spawned entities are in, so walk every slot.
+	int removed = RemoveMcEntities();
 	if (removed)
 		McLog("round restart: removed %d Minecraft entities", removed);
 }
@@ -1532,6 +1550,8 @@ void OnGiveFnptrs()
 	CVAR_REGISTER(&cv_autokit);
 	CVAR_REGISTER(&cv_autojoin);
 	CVAR_REGISTER(&cv_worldReset);
+	extern cvar_t g_cvBombRadius; // mc_world_srv.cpp
+	CVAR_REGISTER(&g_cvBombRadius);
 	CVAR_REGISTER(&cv_botArmor);
 	extern void RegisterTestCvars();
 	RegisterTestCvars();

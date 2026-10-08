@@ -6,7 +6,7 @@ LOG=/z/dev/CSminecraft/game_test/Half-Life/cstrike/logs/mc_server.log
 powershell -File /z/dev/CSminecraft/tools/stop.ps1 >/dev/null
 # the old game can hold the log for a moment after it exits
 for i in $(seq 1 40); do rm -f $LOG 2>/dev/null && [ ! -f $LOG ] && break; sleep 0.25; done
-powershell -Command "& Z:\dev\CSminecraft\tools\launch.ps1 -Map $MAP -Bots $BOTS -Test 'mc_autokit 1;mc_testscript $SC'" >/dev/null
+powershell -Command "& Z:\dev\CSminecraft\tools\launch.ps1 -Map $MAP -Bots $BOTS -Test 'mc_autokit 1;${TESTCMDS:-};mc_testscript $SC'" >/dev/null
 seen=0; t0=$(date +%s); recpid=
 FFMPEG=${FFMPEG:-ffmpeg}
 while [ $(( $(date +%s) - t0 )) -lt $TO ]; do

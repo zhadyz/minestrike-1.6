@@ -135,6 +135,7 @@ void OnRedraw(float time, int intermission)
 		GuiHide();
 }
 
+void DrawCsModelItems(); // mc_anim_cl.cpp
 void OnDrawNormalTriangles()
 {
 	if (!mcgl::Init())
@@ -145,6 +146,7 @@ void OnDrawNormalTriangles()
 	EntDrawAll();
 	extern void PlayersDrawAll();
 	PlayersDrawAll();
+	DrawCsModelItems(); // Minecraft items in Counter-Strike models' hands
 }
 
 void OnDrawTransparentTriangles()

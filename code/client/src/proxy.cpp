@@ -109,6 +109,9 @@ namespace mc
 pfnEngSrc_pfnAddCommand_t InputAddCommandHook();
 pfnEngSrc_pfnHookUserMsg_t InputHookUserMsgHook(pfnEngSrc_pfnHookUserMsg_t real);
 void InstallEventApi(cl_enginefunc_t* e);
+pfnEngSrc_pfnHookEvent_t InputHookEventHook(pfnEngSrc_pfnHookEvent_t real);
+int StudioInterfaceHook(int (*orig)(int, struct r_studio_interface_s**, struct engine_studio_api_s*), int version,
+	struct r_studio_interface_s** ppinterface, struct engine_studio_api_s* pstudio);
 }
 
 static int Hook_Initialize(cl_enginefunc_t* pEnginefuncs, int iVersion)
@@ -124,6 +127,8 @@ static int Hook_Initialize(cl_enginefunc_t* pEnginefuncs, int iVersion)
 	pEnginefuncs->pfnHookUserMsg = mc::InputHookUserMsgHook(realHook);
 	// the client keeps the event API pointer: its bullet traces then see the mod world
 	mc::InstallEventApi(pEnginefuncs);
+	// weapon fire events pass through us (who fired when: Minecraft-model recoil); kept in the client's copy
+	pEnginefuncs->pfnHookEvent = mc::InputHookEventHook(pEnginefuncs->pfnHookEvent);
 	int r = g_orig.pInitFunc(pEnginefuncs, iVersion);
 	pEnginefuncs->pfnAddCommand = real;
 	pEnginefuncs->pfnHookUserMsg = realHook;
@@ -234,6 +239,13 @@ static void Hook_IN_DeactivateMouse()
 	g_orig.pIN_DeactivateMouse();
 }
 
+// the engine asks for the client's studio renderer: hand it a copy whose StudioDrawPlayer also draws
+// held Minecraft items on Counter-Strike models
+static int Hook_HUD_GetStudioModelInterface(int v, struct r_studio_interface_s** p, struct engine_studio_api_s* s)
+{
+	return mc::StudioInterfaceHook(g_orig.pStudioInterface, v, p, s);
+}
+
 static void FillTable(cldll_func_t* t)
 {
 	*t = g_orig;
@@ -254,6 +266,7 @@ static void FillTable(cldll_func_t* t)
 	t->pKeyEvent = Hook_HUD_Key_Event;
 	t->pIN_DeactivateMouse = Hook_IN_DeactivateMouse;
 	t->pCL_IsThirdPerson = Hook_CL_IsThirdPerson;
+	t->pStudioInterface = Hook_HUD_GetStudioModelInterface;
 }
 
 static cldll_func_t g_hooked;
