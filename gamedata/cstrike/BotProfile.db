@@ -1,0 +1,113 @@
+//----------------------------------------------------------------------------
+// BotProfile.db for Counter-Strike: Minecraft Edition
+// Format: Default / Template <name> ... End / <Template+Template> <BotName> ... End
+//----------------------------------------------------------------------------
+
+Default
+	Skill = 50
+	Aggression = 50
+	ReactionTime = 0.3
+	AttackDelay = 0
+	Teamwork = 75
+	Cost = 0
+	Difficulty = EASY+NORMAL+HARD
+	VoicePitch = 100
+	Skin = 0
+	WeaponPreference = none
+End
+
+Template Weak
+	Skill = 20
+	Aggression = 20
+	ReactionTime = 0.4
+	Teamwork = 50
+	Difficulty = EASY+NORMAL
+End
+
+Template Fair
+	Skill = 50
+	Aggression = 50
+	ReactionTime = 0.3
+	Difficulty = EASY+NORMAL+HARD
+End
+
+Template Good
+	Skill = 70
+	Aggression = 70
+	ReactionTime = 0.25
+	Difficulty = NORMAL+HARD+EXPERT
+End
+
+Template Elite
+	Skill = 90
+	Aggression = 90
+	ReactionTime = 0.2
+	Difficulty = HARD+EXPERT
+End
+
+Template Rifleman
+	WeaponPreference = m4a1
+	WeaponPreference = ak47
+	WeaponPreference = famas
+	WeaponPreference = galil
+End
+
+Template Sniper
+	WeaponPreference = awp
+	WeaponPreference = scout
+End
+
+Template Rusher
+	WeaponPreference = p90
+	WeaponPreference = mp5
+	WeaponPreference = ump45
+End
+
+Weak+Rusher Zombie
+End
+Weak+Rifleman Skeleton
+End
+Weak+Rusher Husk
+End
+Weak+Rifleman Stray
+End
+Weak+Rusher Drowned
+End
+Weak+Rifleman Pillager
+End
+Fair+Rifleman Steve
+End
+Fair+Rifleman Alex
+End
+Fair+Rusher Creeper
+End
+Fair+Sniper Enderman
+End
+Fair+Rifleman Villager
+End
+Fair+Rusher Piglin
+End
+Fair+Rifleman Witch
+End
+Fair+Sniper Phantom
+End
+Good+Rifleman Vindicator
+End
+Good+Sniper Evoker
+End
+Good+Rifleman Blaze
+End
+Good+Rusher Ravager
+End
+Good+Rifleman Notch
+End
+Good+Sniper Jeb
+End
+Elite+Rifleman Herobrine
+End
+Elite+Sniper Wither
+End
+Elite+Rifleman Warden
+End
+Elite+Rusher Dinnerbone
+End

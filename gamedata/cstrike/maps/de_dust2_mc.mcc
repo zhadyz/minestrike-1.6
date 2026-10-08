@@ -1,0 +1,6 @@
+// Classic mode: the real de_dust2, with Minecraft built in. The engine runs this sky-box shell; the mod
+// renders and collides with the classic map itself and lets players dig it in 40-unit cells.
+bsp maps/de_dust2.bsp
+origin -2840 -1672 -640
+size 123 141 37
+sky des

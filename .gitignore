@@ -1,0 +1,17 @@
+/game/
+/src/
+/assets/
+/tools/llvm/
+/tools/xwin/
+/tools/xwin-cli/
+/tools/cmake/
+/tools/ninja/
+/tools/ghidra/
+build/
+*.pyc
+__pycache__/
+/work/
+/astra/
+/game_test/
+/tools/sdhlt/
+/docs/VOXELIZER_BRIEF.md

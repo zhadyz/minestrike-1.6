@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="MineStrike 1.6: Minecraft built into Counter-Strike 1.6. The real de_dust2 you can dig, a survival inventory, hunger and elytra flight.">
+<meta property="og:title" content="MineStrike 1.6">
+<meta property="og:description" content="Minecraft built into Counter-Strike 1.6.">
+<meta property="og:image" content="readme/social.png">
+<title>MineStrike 1.6</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@500;700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a field report laid out like a Minecraft inventory screen - media sits in bevelled slots,
+   numbers read like the CS HUD, one column of prose beside slot grids. */
+:root {
+  --bg: #e7dcc1;          /* sandstone */
+  --panel: #f3ecd9;
+  --slot: #c6b892;        /* slot well */
+  --bevel-dark: #8b7c58;
+  --bevel-light: #fbf6e8;
+  --ink: #23242a;         /* deepslate */
+  --muted: #5d5747;
+  --diamond: #138a7e;     /* diamond, darkened for light ground */
+  --amber: #a86400;       /* CS HUD amber */
+  --pass: #2f7d32;
+  --warn: #a35a00;
+  --line: #cdbf9b;
+  --display: "Pixelify Sans", "Courier New", monospace;
+  --body: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1b1c20; --panel: #24262c; --slot: #15161a; --bevel-dark: #0c0d10; --bevel-light: #3a3d46;
+    --ink: #ece5d3; --muted: #a59e8c; --diamond: #4fe3d2; --amber: #ffb33a; --pass: #79c97c; --warn: #f0a24a;
+    --line: #363840; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1b1c20; --panel: #24262c; --slot: #15161a; --bevel-dark: #0c0d10; --bevel-light: #3a3d46;
+  --ink: #ece5d3; --muted: #a59e8c; --diamond: #4fe3d2; --amber: #ffb33a; --pass: #79c97c; --warn: #f0a24a;
+  --line: #363840; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 64px; }
+h1, h2, h3 { font-family: var(--display); font-weight: 700; line-height: 1.1; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.1rem, 5.2vw, 3.6rem); letter-spacing: 0.01em; }
+h2 { font-size: clamp(1.5rem, 3vw, 2rem); }
+h3 { font-size: 1.15rem; font-weight: 500; }
+p { margin: 0; max-width: 66ch; }
+a { color: var(--diamond); }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.eyebrow { font: 600 0.75rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--amber); }
+section { display: grid; gap: 18px; padding-block: 44px 0; }
+.lede { font-size: 1.12rem; color: var(--muted); }
+
+/* the Minecraft slot: dark top-left edge, light bottom-right edge */
+.slot { background: var(--slot); border: 3px solid; border-color: var(--bevel-dark) var(--bevel-light) var(--bevel-light) var(--bevel-dark); }
+.slot img, .slot video { display: block; width: 100%; height: auto; max-width: 100%; aspect-ratio: 16 / 9; object-fit: cover; background: #000; }
+.panel { background: var(--panel); border: 2px solid var(--line); padding: 18px 20px; }
+
+/* hero */
+.hero { display: grid; gap: 22px; padding-block: 8px 0; }
+.hero-text { display: grid; gap: 12px; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); gap: 10px; }
+.fact { display: grid; gap: 2px; padding: 12px 14px; background: var(--panel); border: 2px solid var(--line); }
+.fact b { font: 600 1.5rem/1.1 var(--mono); color: var(--amber); font-variant-numeric: tabular-nums; }
+.fact span { font-size: 0.85rem; color: var(--muted); }
+
+/* galleries */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 18px; }
+figure { margin: 0; display: grid; gap: 8px; min-width: 0; }
+figcaption { font-size: 0.92rem; color: var(--muted); }
+figcaption strong { color: var(--ink); font-weight: 600; }
+
+/* two-column text blocks */
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+.cols > div { min-width: 0; display: grid; gap: 8px; align-content: start; }
+ul { margin: 0; padding-left: 1.1em; display: grid; gap: 6px; }
+li { max-width: 70ch; }
+
+/* tables */
+.table { overflow-x: auto; border: 2px solid var(--line); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.93rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font: 600 0.72rem/1.2 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+tr:last-child td { border-bottom: 0; }
+.chip { display: inline-block; font: 600 0.72rem/1 var(--mono); letter-spacing: 0.06em; padding: 4px 7px; border: 1.5px solid currentColor; white-space: nowrap; }
+.chip.pass { color: var(--pass); }
+.chip.warn { color: var(--warn); }
+kbd { font: 600 0.8rem/1 var(--mono); padding: 3px 6px; border: 2px solid; border-color: var(--bevel-light) var(--bevel-dark) var(--bevel-dark) var(--bevel-light); background: var(--panel); white-space: nowrap; }
+
+footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display: grid; gap: 6px; }
+@media (min-width: 900px) {
+  .hero { grid-template-columns: 1fr 1.25fr; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) { video[autoplay] { animation: none; } }
+
+/* side-by-side comparison and free-aspect slots */
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 18px; }
+.slot-free img { aspect-ratio: auto; object-fit: contain; }
+
+/* architecture diagram: stacked boxes, engine on top, shared code and tools below */
+.arch { display: grid; gap: 10px; }
+.arch-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.box { display: grid; gap: 4px; padding: 12px 14px; background: var(--panel); border: 2px solid var(--line); font: 0.92rem/1.35 var(--mono); }
+.box b { color: var(--diamond); font-weight: 600; }
+.box small { font: 0.85rem/1.45 var(--body); color: var(--muted); }
+.box.engine { text-align: center; border-color: var(--amber); color: var(--amber); font-weight: 600; }
+.box.shared { border-color: var(--diamond); }
+.box.tools { border-style: dashed; }
+.amigos { font: 700 1.05rem/1.2 var(--display); color: var(--amber); padding-top: 10px; }
+.morse { font: 600 0.82rem/1.6 var(--mono); color: var(--muted); letter-spacing: 0.04em; }
+.morse span { white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="hero-text">
+    <span class="eyebrow">Minecraft × Counter-Strike bridge · Technical report · 7 October 2026</span>
+    <h1>MineStrike 1.6</h1>
+    <p class="lede">MineStrike 1.6 embeds Minecraft Java Edition gameplay in Counter-Strike 1.6 without modifying the engine binary. The Counter-Strike client library is closed-source. Its interface was recovered by static analysis of the shipped PE binaries and by instrumenting live calls, and it is extended through a proxy library that forwards all 42 exports. The server library is built from ReGameDLL_CS. The map de_dust2 is parsed, rendered and collided against by the modification itself. This allows any part of the original geometry to be excavated while the engine's movement behaviour is kept. That behaviour was checked against the engine on 4,000 randomized hull traces.</p>
+  </div>
+  <figure>
+    <div class="slot"><video src="report/media/classic_dig.mp4" poster="report/img/classic_dig.jpg" autoplay muted loop playsinline aria-label="Excavating the floor of de_dust2 with a diamond pickaxe"></video></div>
+    <figcaption><strong>Figure 1.</strong> Excavation of de_dust2 in classic mode. The map is drawn by the modification from the original BSP file. Each removed 40-unit cell exposes cross-sections of the surrounding solid space, textured with the map's own WAD textures.</figcaption>
+  </figure>
+</header>
+
+<section aria-label="Key figures">
+  <div class="facts">
+    <div class="fact"><b>42</b><span>client exports forwarded by the proxy, 17 of them wrapped</span></div>
+    <div class="fact"><b>99.9%</b><span>of 4,000 randomized hull traces end where the engine's do</span></div>
+    <div class="fact"><b>5,383</b><span>de_dust2 faces decoded and drawn by the modification</span></div>
+    <div class="fact"><b>18,180</b><span>lines of C++ (client, server, shared)</span></div>
+    <div class="fact"><b>87</b><span>Minecraft sound events, 286 variants</span></div>
+    <div class="fact"><b>19</b><span>scripted in-game test scenarios</span></div>
+  </div>
+</section>
+
+<section id="flight" aria-label="Elytra flight">
+  <figure>
+    <div class="slot"><video src="report/media/flight.mp4" poster="report/img/flight_3.jpg" autoplay muted loop playsinline aria-label="Elytra flight over the block version of de_dust2"></video></div>
+    <figcaption><strong>Figure 2.</strong> Elytra flight over the block version of de_dust2: T spawn, mid, CT spawn, A site and long A. Glide physics follow <code>LivingEntity.travel</code>; firework rockets boost the glide. The middle stretch is the third-person camera.</figcaption>
+  </figure>
+</section>
+
+<section id="re">
+  <span class="eyebrow">1 · Method</span>
+  <h2>Reverse engineering of the shipped binaries</h2>
+  <p>The engine (<code>hw.dll</code>, HL25 build 10210) and the official Counter-Strike client (<code>client.dll</code>) are distributed only as 32-bit PE binaries. No source code or symbol files for either were used. Analysis proceeded in two stages.</p>
+  <div class="cols">
+    <div><h3>Static analysis</h3><p>Three purpose-written tools in <code>tools/re/</code> parse the binaries directly. <code>pe_exports.py</code> reads the export directory. <code>pe_info.py</code> reads the section table and image base, and maps virtual addresses to file offsets. <code>strings.py</code> scans for printable strings with a regular-expression filter. Together they establish the exported entry points and their order, and the command names, console variables and error messages each binary contains.</p></div>
+    <div><h3>Dynamic analysis</h3><p>The proxy library logs every call it forwards, with arguments, which shows the calling order and the data that crosses each entry point. On the server side, <code>mc_msgtrace</code> intercepts the engine's user-message functions (<code>RegUserMsg</code>, <code>MessageBegin</code>, <code>Write*</code>). It records every message sent to a client, so a working and a failing session can be compared message by message.</p></div>
+  </div>
+  <div class="table"><table>
+    <thead><tr><th>Finding</th><th>Method</th><th>Consequence for the design</th></tr></thead>
+    <tbody>
+      <tr><td>The client exports the API-proxy entry point <code>F</code>. The engine passes it a function table with some slots already filled in: the destination-address and module-function conventions of <code>APIProxy.h</code>.</td><td>Export table; call logging</td><td>The proxy must call the original <code>F</code> on the engine's own buffer, then overwrite only the slots it wraps. Building a fresh table makes the engine fail to initialize.</td></tr>
+      <tr><td>The client copies the engine function table during <code>Initialize</code> and registers its commands later, in <code>HUD_Init</code>, through that copy.</td><td>Call logging</td><td>The proxy swaps <code>pfnAddCommand</code> and <code>pfnHookUserMsg</code> only for the duration of the original <code>Initialize</code>. That is how <code>slot1</code>–<code>slot10</code>, <code>invnext</code>, <code>invprev</code> and <code>buy</code> are redirected to the hotbar.</td></tr>
+      <tr><td><code>hw.dll</code> maps the <code>-game</code> directory name to a Steam application ID: <code>cstrike</code> is 10, any other name is 70.</td><td>Strings; engine log</td><td>A separate mod directory fails Steam authentication. The modification is installed into a private copy of <code>cstrike</code>.</td></tr>
+      <tr><td>The argument of <code>HUD_Frame</code> is the frame interval, not a timestamp.</td><td>Call logging</td><td>All client animation is driven by <code>GetClientTime()</code>. An earlier build froze because it treated the argument as a clock.</td></tr>
+      <tr><td>The <code>thirdperson</code> command is registered but has no effect in this client build.</td><td>Strings; runtime test</td><td>The modification has its own camera, and wraps <code>CL_IsThirdPerson</code> so the engine draws the local player model.</td></tr>
+      <tr><td><kbd>Esc</kbd> is consumed by the engine's menu before <code>HUD_Key_Event</code> is called.</td><td>Call logging</td><td><code>IN_DeactivateMouse</code> is wrapped and used as the signal to close the modification's screens.</td></tr>
+      <tr><td>The renderer runs an OpenGL 4.6 compatibility context. Inside <code>HUD_DrawNormalTriangles</code>, program 0 is bound and the fixed-function matrices are valid.</td><td>GL state queries</td><td>The GLSL renderers draw in that callback, then restore the engine's state.</td></tr>
+      <tr><td>The HL25 default configuration binds the right mouse button to <code>+alt1</code> (<code>IN_ALT1</code>, bit 14), not <code>+attack2</code>.</td><td>Configuration files; input logging</td><td>The server treats both bits as the use action. Scripted tests that set <code>IN_ATTACK2</code> had passed while real clicks did nothing.</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="server">
+  <span class="eyebrow">2 · Server</span>
+  <h2>Game logic on ReGameDLL_CS</h2>
+  <p>The server library <code>mp.dll</code> is built from ReGameDLL_CS, an open-source reimplementation of Counter-Strike's game library, with a Minecraft module attached through its hook chains: spawn, damage, death, think, item use and buying. Minecraft's rules were reimplemented from the behaviour of the corresponding Java Edition 1.21 classes. These include <code>FoodData</code> (food level, saturation, and an exhaustion threshold of 4.0), the attack-damage and attack-speed tables with cooldown, critical hits, sweep and knockback, and the armor and toughness damage formula. Elytra flight follows <code>LivingEntity.travel</code>, and explosions use the ray-cast model. One Minecraft health point is 5 Counter-Strike health points. The player inventory uses the slot numbering of <code>InventoryMenu</code>, plus one extra slot (46) for disposal. Inventory clicks are server-authoritative: the client sends only the slot, the button and the Shift state. The network delta description (<code>delta.lst</code>) is widened so that player flags, armor codes and firework boosts reach client-side prediction.</p>
+</section>
+
+<section id="classic">
+  <span class="eyebrow">3 · Map</span>
+  <h2>Collision and rendering of an excavatable de_dust2</h2>
+  <p>In classic mode, the engine loads a sealed, empty sky-box map. The modification loads <code>de_dust2.bsp</code> (BSP version 30) itself: 9,582 planes, 2,766 nodes, 8,321 clipnodes, 5,383 faces and 10 solid brush models.</p>
+  <div class="cols">
+    <div><h3>Collision</h3><p>Hull traces follow the engine's recursive hull check as implemented in ReHLDS, an open-source reimplementation of the engine. Hull selection follows <code>SV_HullForBsp</code>. Hull 0 is derived from the node tree, and hulls 1–3 come from the clipnodes. Traces from the player-movement code in both libraries pass through one shared function, so client prediction matches the server.</p></div>
+    <div><h3>Excavation</h3><p>The map is overlaid with a 40-unit grid. Each cell is untouched, excavated, or holds a placed block. When a trace touches excavated space, it switches to a carve-aware path. That path intersects each intact cell with the solid leaves of hull 0, which gives a set of convex pieces, then sweeps the player box against those pieces with bevel planes, as Quake III does against brushes. The switch happens only when the contact point itself lies in excavated space. An earlier rule, which switched near any excavation, caught players on hole edges.</p></div>
+    <div><h3>Rendering</h3><p>Textures are decoded from the WAD3 miptex data and stored in one texture array. Lightmaps are packed into a 2048 × 2048 atlas. Geometry is built in chunks of 8³ cells. Faces are clipped per cell where cells have been removed, and the exposed cross-sections are produced by clipping polygons through the BSP tree.</p></div>
+  </div>
+  <div class="pair">
+    <figure><div class="slot"><img src="report/img/ab_engine.jpg" alt="de_dust2 rendered by the Half-Life engine"></div><figcaption><strong>Figure 3a.</strong> Reference view, drawn by the engine.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/ab_mod.jpg" alt="The same view drawn by the modification from the BSP file"></div><figcaption><strong>Figure 3b.</strong> The same view, drawn by the modification from the BSP file.</figcaption></figure>
+  </div>
+  <div class="grid">
+    <figure><div class="slot"><img src="report/img/classic_dig.jpg" alt="An excavated cell in the dust2 floor"></div><figcaption><strong>Figure 4.</strong> An excavated cell. The walls of the cut are generated from the map's solid space and align with the surrounding brushes.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/classic_place.jpg" alt="Cobblestone blocks placed on the dust2 floor"></div><figcaption><strong>Figure 5.</strong> Placed blocks. Each one occupies a cell in front of the surface that was hit.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/ab_mod2.jpg" alt="A second view of de_dust2 drawn by the modification"></div><figcaption><strong>Figure 6.</strong> A second comparison view. The baked lightmaps are reproduced with a configurable brightness curve.</figcaption></figure>
+  </div>
+</section>
+
+<section id="survival">
+  <span class="eyebrow">4 · Survival systems</span>
+  <h2>Inventory, hunger and regeneration</h2>
+  <div class="cols">
+    <div>
+      <p>The survival inventory (<kbd>Shift</kbd>+<kbd>E</kbd>) implements Minecraft's click semantics. Left-click picks up, places or swaps a stack. Right-click splits a stack or places a single item. Shift-click moves a stack to its preferred destination: armor to the armor slots, hotbar to storage and back. Picked-up items fill the hotbar first, then the 27 storage slots. Partial stacks are accepted when space is short. On death, every weapon and item the player carries is dropped.</p>
+      <p>Counter-Strike's fixed health is replaced by Minecraft's food model. Movement, jumping, attacking, taking damage and healing add exhaustion. Every 4.0 points of exhaustion consumes one point of saturation, or one point of food when saturation is exhausted. With full food and saturation, the player heals every 10 ticks. At 18 food or more, the player heals every 80 ticks. At zero food, the player starves down to one health point. A golden apple grants Regeneration II for 5 s and 4 absorption points.</p>
+    </div>
+    <figure><div class="slot"><img src="report/img/inventory.jpg" alt="The survival inventory with diamond armor equipped and a Diamond Pickaxe tooltip"></div><figcaption><strong>Figure 7.</strong> The survival inventory: armor slots, a preview of the player model, the 2×2 crafting grid and item tooltips.</figcaption></figure>
+  </div>
+  <div class="grid">
+    <figure><div class="slot"><img src="report/img/apple.jpg" alt="Holding a golden apple, with two absorption hearts above the health bar"></div><figcaption><strong>Figure 8.</strong> After a golden apple: two absorption hearts above the health row.</figcaption></figure>
+    <figure><div class="slot slot-free"><img src="report/img/hud.jpg" alt="The HUD: armor, absorption, health, hunger, and a hotbar with a pistol and a knife"></div><figcaption><strong>Figure 9.</strong> The HUD. Hotbar slots 1–5 hold the Counter-Strike weapons. Their icons are generated from the game's own weapon images by <code>tools/assets/gun_icons.py</code>.</figcaption></figure>
+  </div>
+</section>
+
+<section id="play">
+  <span class="eyebrow">5 · Operation</span>
+  <h2>Launch configurations and controls</h2>
+  <div class="cols">
+    <div>
+      <p>Three launchers in the repository root start a local, offline listen server with bots:</p>
+      <ul>
+        <li><code>PLAY_MineStrike_dust2.bat</code>: classic mode. The original de_dust2 with standard rounds, bomb sites, buy zones and player models, and the map can be excavated.</li>
+        <li><code>PLAY_Minecraft_dust2.bat</code>: de_dust2 converted to 123 × 141 × 37 Minecraft blocks, with mobs.</li>
+        <li><code>PLAY_classic_dust2_with_Minecraft_items.bat</code>: the unmodified map with the Minecraft items and HUD only.</li>
+      </ul>
+      <p>Setup requirements are listed in <code>README.md</code>. Counter-Strike's files come from the user's own installation. Minecraft assets are downloaded from Mojang's servers for the user's own account. Neither is included in this repository.</p>
+    </div>
+    <div class="table">
+      <table style="min-width:0">
+        <tbody>
+          <tr><td><kbd>B</kbd></td><td>Counter-Strike buy menu; in creative mode, the Minecraft creative inventory</td></tr>
+          <tr><td><kbd>Shift</kbd>+<kbd>E</kbd></td><td>Survival inventory</td></tr>
+          <tr><td><kbd>1</kbd>–<kbd>5</kbd> / <kbd>6</kbd>–<kbd>9</kbd></td><td>Counter-Strike weapons / Minecraft hotbar</td></tr>
+          <tr><td><kbd>Mouse 1</kbd></td><td>Attack, or hold to mine</td></tr>
+          <tr><td><kbd>Mouse 2</kbd></td><td>Use: place, open, eat, equip, throw, fire</td></tr>
+          <tr><td><kbd>Space</kbd> while falling</td><td>Elytra glide</td></tr>
+          <tr><td><kbd>F5</kbd></td><td>Camera: first person, rear, front</td></tr>
+          <tr><td><kbd>G</kbd></td><td>Drop the held item</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="clips">
+  <span class="eyebrow">6 · Recordings</span>
+  <h2>Scripted scenarios</h2>
+  <p>Each recording is a scripted scenario executed in the unmodified engine and captured from the game window. The server drives the local player. No frame was edited.</p>
+  <div class="grid">
+    <figure><div class="slot"><video src="report/media/combat.mp4" poster="report/img/combat_bot.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Melee combat.</strong> A diamond sword against a bot: attack cooldown, critical hits, knockback, experience orbs and an advancement.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/creeper.mp4" poster="report/img/creeper_swell_b.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Creeper.</strong> Approach, 1.5 s fuse with swelling, then a ray-cast explosion that removes 91 blocks.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/enderman.mp4" poster="report/img/ender_model.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Enderman.</strong> Every projectile hit is converted into a teleport; melee damage is applied normally.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/gui.mp4" poster="report/img/gui_tooltip.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Creative inventory.</strong> Operated with real mouse clicks and key presses.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/mine.mp4" poster="report/img/mine_b.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Mining.</strong> Break times by tool tier and material, crack stages, fragments and drops.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/tnt.mp4" poster="report/img/tnt_c.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>TNT.</strong> Ignition with flint and steel, the fuse, and the explosion's effect on terrain.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/items.mp4" poster="report/img/items_totem.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Items.</strong> Bow, ender pearl, Bottle o' Enchanting, fireworks, golden apple, and a totem of undying absorbing a 500-damage hit.</figcaption></figure>
+    <figure><div class="slot"><video src="report/media/tour.mp4" poster="report/img/tour_door_b.jpg" controls muted preload="none" playsinline></video></div>
+      <figcaption><strong>Tour.</strong> HUD, text-menu fallback, a door, and a take-off.</figcaption></figure>
+  </div>
+</section>
+
+<section id="stills">
+  <span class="eyebrow">7 · Additional figures</span>
+  <h2>Models and interface</h2>
+  <div class="grid">
+    <figure><div class="slot"><img src="report/img/flight_2.jpg" alt="Third-person view of a player gliding on an elytra"></div><figcaption><strong>Figure 10.</strong> Elytra in third person, posed as in <code>ElytraModel</code>.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/gui_tooltip.jpg" alt="Creative inventory with a Diamond Sword tooltip"></div><figcaption><strong>Figure 11.</strong> Creative inventory with attribute tooltips, drawn with Minecraft's own textures.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/gui_kits.jpg" alt="Kits tab laid out like saved hotbars"></div><figcaption><strong>Figure 12.</strong> Equipment kits, laid out like Minecraft's saved hotbars.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/combat_xp.jpg" alt="Advancement toast after a kill"></div><figcaption><strong>Figure 13.</strong> An advancement notification and a death message in Minecraft's wording.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/model_front.jpg" alt="Third-person Minecraft player model in diamond armor"></div><figcaption><strong>Figure 14.</strong> The player model, a port of <code>HumanoidModel</code> with armor layers.</figcaption></figure>
+    <figure><div class="slot"><img src="report/img/ab_engine2.jpg" alt="A second de_dust2 reference view drawn by the engine"></div><figcaption><strong>Figure 15.</strong> Reference view drawn by the engine (pair of Figure 6).</figcaption></figure>
+  </div>
+</section>
+
+<section id="how">
+  <span class="eyebrow">8 · Architecture</span>
+  <h2>Components and toolchain</h2>
+  <div class="arch" role="img" aria-label="Architecture: the unmodified engine loads client.dll, a proxy around Valve's client with the renderers and interface, and mp.dll, built from ReGameDLL_CS with the Minecraft module. Both link the shared collision and map code. Offline tools build maps and assets.">
+    <div class="box engine">GoldSrc engine · HL25 build 10210, unmodified</div>
+    <div class="arch-row">
+      <div class="box"><span><b>client.dll</b> proxy</span><small>forwards 42 exports to Valve's client · classic-map renderer · block renderer · HUD, held item, inventories · models, particles, sounds</small></div>
+      <div class="box"><span><b>mp.dll</b> · ReGameDLL_CS</span><small>Minecraft module · items, combat, hunger, inventory · excavation, placement, explosions · mobs, advancements</small></div>
+    </div>
+    <div class="box shared"><b>code/shared</b><small>BSP loader and hull trace · carve-aware collision · block and item registries · player movement</small></div>
+    <div class="box tools"><b>tools/</b><small>PE analysis · map voxelizer · navigation-mesh generator · asset fetcher · weapon-icon generator · build and test runners</small></div>
+  </div>
+  <div class="cols">
+    <div><h3>Toolchain</h3><p>clang-cl and lld cross-compile 32-bit Windows libraries against the MSVC runtime and Windows SDK, obtained with xwin. No Visual Studio installation is required. CMake and Ninja drive the build.</p></div>
+    <div><h3>Block-world conversion</h3><p>A voxelizer samples BSP point contents at half-block resolution, keeps thin walls watertight, and maps WAD textures to blocks. It then compiles a sealed shell map with SDHLT for the engine to load. Bot navigation meshes are generated from the voxels.</p></div>
+  </div>
+</section>
+
+<section id="verification">
+  <span class="eyebrow">9 · Verification</span>
+  <h2>Methodology and results</h2>
+  <p>Collision was checked against the engine directly. With the engine running the real de_dust2, <code>mc_bsptest</code> fires randomized traces through both the engine's trace function and the modification's, and compares the end position, the start-solid flag, the surface normal and the point contents. Each gameplay feature has a scripted scenario. The server drives the local player and logs checkpoints, and a runner captures the game window at each one. Where noted, input is real: key presses and mouse clicks sent to the game window.</p>
+  <div class="table"><table>
+    <thead><tr><th>Collision measurement</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Hull traces, all four hulls, intact map (4,000)</td><td>3,996 identical end positions (99.9%). The 4 disagreements, and the 3 start-solid disagreements, occur only on traces that start inside solid space.</td></tr>
+      <tr><td>Cost per trace, intact map</td><td>0.74 µs for the modification, 0.47 µs for the engine</td></tr>
+      <tr><td>Carve-aware path against the engine, point hull (250)</td><td>0 disagreements</td></tr>
+      <tr><td>Carve-aware path against the engine, hulls 1–3 (750)</td><td>131 disagreements (17.5%). These come from player-clip brushes, which exist only in hulls 1–3 and are absent from the pieces derived from hull 0.</td></tr>
+      <tr><td>Cost per trace, carve-aware path</td><td>52.7 µs, used only for contacts in excavated space</td></tr>
+    </tbody>
+  </table></div>
+  <div class="table"><table>
+    <thead><tr><th>Scenario</th><th>Observation</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td><code>views</code></td><td>Eight reference views drawn by the engine and by the modification. The geometry and textures agree; the modification's output is slightly darker, by an engine-to-modification ratio of about 1.05 in red, 1.1 in green and 1.2–1.3 in blue.</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>pit</code></td><td>Real key input: entering a newly excavated pit, moving along its edge, leaving it</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>place</code></td><td>Real right-clicks place blocks on floors and walls</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>inv</code></td><td>Pick up and place stacks, Shift-click armor into its slots, delete an item in the disposal slot</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>food</code></td><td>Bread raises food from 14 to 19. Natural regeneration raises health from 85 to 90 within 4 s. A golden apple adds 20 absorption HP.</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>combat</code></td><td>Damage and cooldown, death, experience orbs, level-up, advancement</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>flight</code> / <code>elytra</code></td><td>Glide physics; firework boost to about 1,300 units/s</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>mine</code> / <code>tnt</code></td><td>Break times, drops, crack overlay, explosion crater</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>creeper</code> / <code>creeperwatch</code></td><td>Fuse after 1.5 s; 100→54 HP through diamond armor; in a live round the creeper crossed the map to the player</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>enderman</code></td><td>Bullet hits cause a teleport and no damage; three sword hits kill</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>items</code></td><td>Ender pearl teleport (−25 HP); the totem survives 500 damage</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>gui</code></td><td>Real clicks through the creative inventory, including a kit and a number-key transfer</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>changelevel</code></td><td>de_dust2 → mc_dust2 → de_dust2 with the inventory preserved</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>userflow</code></td><td>Real input from the launcher through the MOTD, team selection, spawn and inventory</td><td><span class="chip pass">PASS</span></td></tr>
+    </tbody>
+  </table></div>
+  <div class="panel cols">
+    <div><h3>Defects found in interactive testing</h3><ul>
+      <li>Block placement ignored real right-clicks, because of the <code>+alt1</code> binding described in section 1.</li>
+      <li>Players stopped at the edges of excavations. The carve-aware path had taken over anywhere near excavated space; it now takes over only when the contact lies in it.</li>
+      <li>Items could not be picked up once the hotbar was full. Fixed by adding inventory storage and partial pickup.</li>
+      <li>Clicks arrived as Shift-clicks after the inventory was opened with Shift+E, because the tracked modifier state stuck. Modifier state is now read from the operating system.</li>
+      <li>Held items were mirrored by an obsolete transform. They now use Minecraft's first-person transforms exactly.</li>
+    </ul></div>
+    <div><h3>Defects found by scripted tests</h3><ul>
+      <li>The team menu was lost after the MOTD. The round restart dropped the queued menu, and equipping unjoined players re-sent the MOTD.</li>
+      <li>All client animation froze, because of the <code>HUD_Frame</code> argument described in section 1.</li>
+      <li>Particle texture names were corrupted, because they were referenced through pointers into a vector that reallocates.</li>
+    </ul></div>
+    <div><h3>Limitations</h3><ul>
+      <li>The carve-aware collision ignores player-clip brushes, as measured above.</li>
+      <li>Lightmap brightness differs slightly from the engine's.</li>
+      <li><kbd>Esc</kbd> closes the modification's screens but also opens the engine menu.</li>
+      <li>Bots use Counter-Strike weapons only. Minecraft items are not yet drawn on Counter-Strike player models in third person.</li>
+      <li>All verification so far was done by the author. No independent review has taken place.</li>
+    </ul></div>
+  </div>
+</section>
+
+<section id="next">
+  <span class="eyebrow">10 · Further work</span>
+  <h2>In progress</h2>
+  <ul>
+    <li>Minecraft music, played with Minecraft's track selection and silence intervals.</li>
+    <li>Placeable, ignitable TNT in classic mode, and redstone components: dust, torches, levers, buttons, pressure plates, lamps and repeaters.</li>
+    <li>A Minecraft category in the Counter-Strike buy menu, and a crossbow that can be dropped and picked up like a Counter-Strike weapon.</li>
+    <li>Footstep and bullet-impact sounds chosen by the dust2 texture underneath.</li>
+  </ul>
+</section>
+
+<footer>
+  <span>Reproduction: <code>tools/build.sh</code> builds both libraries. <code>tools/runtest.sh de_dust2_mc food</code> runs a scenario. <code>mc_bsptest 4000</code>, run on de_dust2, repeats the collision measurement.</span>
+  <span>Minecraft textures and sounds are downloaded from Mojang's servers for the user's own account and remain local. Counter-Strike files come from the user's own installation. Neither is redistributed.</span>
+  <span class="amigos">Built for the amigos.</span>
+  <span class="morse"><span>- ---</span> / <span>-- -.--</span> / <span>-- --- --- -.</span> / <span>.- -. -..</span> / <span>-- -.--</span> / <span>... - .- .-. ... --..--</span> / <span>.... .- .--. .--. -.--</span> / <span>-... .. .-. - .... -.. .- -.-- .-.-.-</span></span>
+</footer>
+
+</div>
+</body>
+</html>

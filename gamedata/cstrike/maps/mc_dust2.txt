@@ -1,0 +1,14 @@
+Dust II - Minecraft Edition
+de_dust2 rebuilt from 123 x 141 x 37 Minecraft blocks.
+
+Everything here is a block: mine it with a pickaxe,
+build cover, blow craters with TNT and HE grenades,
+open and close the doors.
+
+Counter-Terrorists: stop the Terrorists from bombing
+the A and B sites.
+Terrorists: plant the C4 at A or B.
+
+Press B for the creative inventory: diamond and
+netherite gear, elytra, fireworks, tools and blocks.
+Watch out for the Creeper.

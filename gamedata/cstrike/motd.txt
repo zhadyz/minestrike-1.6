@@ -1,0 +1,11 @@
+<html><body style="background:#1e1e1e;color:#e0e0e0;font-family:Tahoma;font-size:13px">
+<h2 style="color:#80ff20">MineStrike 1.6</h2>
+<p><b>B</b> - Counter-Strike buy menu &nbsp; <b>Shift+B</b> - Minecraft item menu &nbsp; <b>Shift+E</b> - inventory (armor, crafting, trash) &nbsp; <b>Shift+M</b> - pick your character<br>
+<b>1-9</b> / <b>mouse wheel</b> - hotbar: guns and Minecraft items, rearrange them in the inventory<br>
+<b>Left click</b> - attack (watch the cooldown under the crosshair) / hold to mine<br>
+<b>Right click</b> - use: place blocks, flip levers, open doors, eat, draw the bow, load and fire the crossbow<br>
+<b>Jump while falling</b> with an elytra - glide; <b>right click a firework</b> while gliding to boost<br>
+<b>G</b> - drop the held item &nbsp; <b>F5</b> - camera</p>
+<p>Dig through the real de_dust2, build, wire redstone and light TNT. Eat to heal. Full netherite makes you very hard to kill.</p>
+<p>Chat: <b>/give diamond_sword</b>, <b>/kit</b>, <b>/character</b>, <b>/gamemode creative</b>, <b>/xp 30 levels</b>, <b>/help</b></p>
+</body></html>
