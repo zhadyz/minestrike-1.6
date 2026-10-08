@@ -1250,23 +1250,36 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 			float before = damage;
 			// every hit still costs at least 1 HP (a bullet against full netherite: 1)
 			damage = fmaxf(fminf(1.0f, before), before * (1.0f - reduction));
-			// armor durability: Minecraft damages each piece by max(1, damage/4)
+			// armor durability: Minecraft damages each piece by max(1, damage/4), and its half-second
+			// invulnerability window lets that happen twice a second at most. Guns land far more hits than
+			// that, so wear keeps the same window: one charge per window, topped up by a bigger hit.
+			const float kWearWindow = 0.5f;
 			int wear = max(1, (int)(mcDamage / 4.0f));
-			for (int i = 0; i < mci::NUM_ARMOR_SLOTS; i++)
+			if (gpGlobals->time >= mp.armorWearUntil || gpGlobals->time < mp.armorWearUntil - kWearWindow)
 			{
-				mci::Stack& s = mp.armor[i];
-				const mci::ItemDef& d = mci::Item(s.id);
-				if (s.Empty() || d.type != mci::IT_ARMOR || d.durability <= 0)
-					continue;
-				s.damage += wear;
-				if (s.damage >= d.durability)
-				{
-					FxSound(mcs::MCS_ITEM_BREAK, pl->pev->origin, 0.8f, 0.8f + RANDOM_FLOAT(0.0f, 0.4f));
-					s = mci::Stack();
-					mp.statDirty = true;
-				}
+				mp.armorWearUntil = gpGlobals->time + kWearWindow;
+				mp.armorWearDone = 0;
 			}
-			mp.invDirty = true;
+			wear -= mp.armorWearDone;
+			if (wear > 0)
+			{
+				mp.armorWearDone += wear;
+				for (int i = 0; i < mci::NUM_ARMOR_SLOTS; i++)
+				{
+					mci::Stack& s = mp.armor[i];
+					const mci::ItemDef& d = mci::Item(s.id);
+					if (s.Empty() || d.type != mci::IT_ARMOR || d.durability <= 0)
+						continue;
+					s.damage += wear;
+					if (s.damage >= d.durability)
+					{
+						FxSound(mcs::MCS_ITEM_BREAK, pl->pev->origin, 0.8f, 0.8f + RANDOM_FLOAT(0.0f, 0.4f));
+						s = mci::Stack();
+						mp.statDirty = true;
+					}
+				}
+				mp.invDirty = true;
+			}
 		}
 	}
 
@@ -1311,7 +1324,8 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 	{
 		FxHurt(pl->entindex());
 		if (pl->IsAlive())
-			FxSound(MobHurtSound(pl), pl->pev->origin, 1.0f, 0.8f + RANDOM_FLOAT(0.0f, 0.4f), pl->entindex());
+			FxSound((bits & DMG_BURN) && MobOf(pl) == MOB_PLAYER ? mcs::MCS_PLAYER_HURT_FIRE : MobHurtSound(pl), pl->pev->origin, 1.0f,
+				0.8f + RANDOM_FLOAT(0.0f, 0.4f), pl->entindex());
 	}
 	return r;
 }
@@ -1555,6 +1569,8 @@ void OnGiveFnptrs()
 	CVAR_REGISTER(&cv_botArmor);
 	extern void RegisterTestCvars();
 	RegisterTestCvars();
+	HitRigsInit();
+	FireInit();
 	InstallEngineTraceWrappers();
 	mcw::InitBlockRegistry();
 	g_ReGameHookchains.m_InternalCommand.registerHook(&H_InternalCommand, HC_PRIORITY_DEFAULT);
@@ -1681,6 +1697,8 @@ void StartFrame()
 	extern void TestFrame();
 	TestFrame();
 	CreeperFrame();
+	FireFrame();
+	HitRigsFrame();
 	ShowPendingTeamMenus();
 	// Minecraft death: the body vanishes in a puff after a moment and drops its XP.
 	for (int i = 1; i <= gpGlobals->maxClients; i++)

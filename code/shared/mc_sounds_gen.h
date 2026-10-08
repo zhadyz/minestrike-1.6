@@ -72,6 +72,9 @@ enum Sound : int
 	MCS_CROSSBOW_LOAD_START, // item.crossbow.loading_start
 	MCS_CROSSBOW_LOAD_END, // item.crossbow.loading_end
 	MCS_CROSSBOW_SHOOT, // item.crossbow.shoot
+	MCS_FLINT_USE, // item.flintandsteel.use
+	MCS_FIRE_AMBIENT, // block.fire.ambient
+	MCS_PLAYER_HURT_FIRE, // entity.player.hurt_on_fire
 	MCS_STONE_BREAK, // block.stone.break
 	MCS_STONE_HIT, // block.stone.hit
 	MCS_STONE_PLACE, // block.stone.place

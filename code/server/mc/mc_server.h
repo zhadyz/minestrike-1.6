@@ -35,6 +35,12 @@ struct McPlayer
 	int regenLevel = 0;
 	int regenTimer = 0;
 	float absorption = 0.0f; // extra HP that soaks damage first (golden apples)
+	// on fire (mc_fire.cpp): alight until fireUntil, hurt again at fireNext, the kill goes to fireOwner
+	float fireUntil = 0.0f, fireNext = 0.0f, fireFlames = 0.0f;
+	int fireOwner = 0;
+	// armor wear is charged once per Minecraft invulnerability window, not once per bullet
+	float armorWearUntil = 0.0f;
+	int armorWearDone = 0; // wear already charged in the open window
 	bool foodReset = true;   // set on death: food refills on the next spawn
 	Vector lastPos;
 	bool lastPosValid = false;
@@ -152,6 +158,12 @@ void RedstoneCellChanged(int x, int y, int z, mcw::Cell c);
 void RedstoneFrame();
 bool RedstoneUse(CBasePlayer* pl, int x, int y, int z);
 bool PartSupported(int x, int y, int z); // mc_world_srv.cpp
+// fire (mc_fire.cpp)
+bool FireLight(int x, int y, int z, CBasePlayer* by); // flint and steel; false: no fire can be lit there
+void FireInit();
+void FireFrame();
+void FireReset();
+int FireCount();
 
 // advancements + death messages (mc_advance.cpp)
 enum Adv
@@ -197,6 +209,15 @@ void CreeperSpawn(CBasePlayer* pl);
 bool CreeperRestrictsItem(CBasePlayer* pl, int item);
 void CreeperFrame();
 bool EndermanDodge(CBasePlayer* pl, CBaseEntity* inflictor, CBaseEntity* attacker, int bits);
+
+// hit boxes of players drawn as Minecraft models (mc_hitbox.cpp)
+void HitRigsInit();
+bool HitRigsHide(edict_t* skip); // before the engine's line trace; true: restore and trace must follow
+void HitRigsRestore();
+void HitRigsTrace(const float* v1, const float* v2, TraceResult* ptr);
+void HitRigsFrame();
+void HitRigsLogMap(CBasePlayer* shooter, CBasePlayer* target, float yawOff);
+bool BotAimAtRig(CBasePlayer* bot, CBasePlayer* enemy, bool head, Vector& aimSpot); // cs_bot_update.cpp
 
 // Items in the world
 CBaseEntity* SpawnItemEntity(const float* origin, int itemId, int count, const float* velocity);

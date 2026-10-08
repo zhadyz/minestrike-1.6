@@ -43,6 +43,7 @@ enum ParticleKind : uint8_t
 	PK_TOTEM,
 	PK_XP_SPLASH,
 	PK_PORTAL,         // enderman teleport / ender pearl
+	PK_FLAME,          // fire, and players on fire
 };
 
 // ---------------------------------------------------------------------------------------------

@@ -70,6 +70,9 @@ static const SoundVariant v_WOOD_PLATE_OFF[] = {{"mc/random/click.wav", 0.300f, 
 static const SoundVariant v_CROSSBOW_LOAD_START[] = {{"mc/item/crossbow/loading_start.wav", 0.300f, 1.000f, 1}};
 static const SoundVariant v_CROSSBOW_LOAD_END[] = {{"mc/item/crossbow/loading_end.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_CROSSBOW_SHOOT[] = {{"mc/item/crossbow/shoot1.wav", 0.800f, 1.000f, 1}, {"mc/item/crossbow/shoot1.wav", 0.900f, 1.000f, 1}, {"mc/item/crossbow/shoot1.wav", 0.900f, 0.900f, 1}, {"mc/item/crossbow/shoot2.wav", 0.800f, 1.000f, 1}, {"mc/item/crossbow/shoot2.wav", 0.900f, 1.000f, 1}, {"mc/item/crossbow/shoot2.wav", 0.900f, 0.900f, 1}, {"mc/item/crossbow/shoot3.wav", 0.800f, 1.000f, 1}, {"mc/item/crossbow/shoot3.wav", 0.900f, 1.000f, 1}, {"mc/item/crossbow/shoot3.wav", 0.900f, 0.900f, 1}};
+static const SoundVariant v_FLINT_USE[] = {{"mc/fire/ignite.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_FIRE_AMBIENT[] = {{"mc/fire/fire.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_PLAYER_HURT_FIRE[] = {{"mc/entity/player/hurt/fire_hurt1.wav", 1.000f, 1.000f, 1}, {"mc/entity/player/hurt/fire_hurt2.wav", 1.000f, 1.000f, 1}, {"mc/entity/player/hurt/fire_hurt3.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_BREAK[] = {{"mc/dig/stone1.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone2.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone3.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone4.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_HIT[] = {{"mc/step/stone1.wav", 1.000f, 1.000f, 1}, {"mc/step/stone2.wav", 1.000f, 1.000f, 1}, {"mc/step/stone3.wav", 1.000f, 1.000f, 1}, {"mc/step/stone4.wav", 1.000f, 1.000f, 1}, {"mc/step/stone5.wav", 1.000f, 1.000f, 1}, {"mc/step/stone6.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_PLACE[] = {{"mc/dig/stone1.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone2.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone3.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone4.wav", 1.000f, 1.000f, 1}};
@@ -171,6 +174,9 @@ const SoundEvent g_sounds[MCS_COUNT] = {
 	{"item.crossbow.loading_start", 1, v_CROSSBOW_LOAD_START},
 	{"item.crossbow.loading_end", 1, v_CROSSBOW_LOAD_END},
 	{"item.crossbow.shoot", 9, v_CROSSBOW_SHOOT},
+	{"item.flintandsteel.use", 1, v_FLINT_USE},
+	{"block.fire.ambient", 1, v_FIRE_AMBIENT},
+	{"entity.player.hurt_on_fire", 3, v_PLAYER_HURT_FIRE},
 	{"block.stone.break", 4, v_STONE_BREAK},
 	{"block.stone.hit", 6, v_STONE_HIT},
 	{"block.stone.place", 4, v_STONE_PLACE},

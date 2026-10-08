@@ -27,6 +27,13 @@ void ClassicResetAll();
 void ClassicDraw();
 float ClassicLightAt(const float* p);
 float ClassicCellBrightness(int x, int y, int z);
+mcc::Classic* ClassicClient();
+static int g_tPlainTorch = -1;
+// block light on classic maps (BlockLightUpdate)
+static std::vector<uint8_t> g_bl;     // level 0..15 per cell
+static std::vector<uint8_t> g_blOpen; // untouched classic cells: 0 not asked yet, 1 open, 2 solid
+static std::vector<uint32_t> g_blLit; // the cells holding light (to clear them)
+static bool g_blDirty = true;
 
 static const float BS = 40.0f;
 static const int CH = 16; // chunk size in blocks
@@ -57,7 +64,7 @@ struct BlockLayers
 static std::vector<BlockLayers> g_blockLayers;
 
 static GLuint g_prog = 0, g_vao = 0;
-static GLint u_tex = -1, u_fogColor = -1, u_fogStart = -1, u_fogEnd = -1;
+static GLint u_tex = -1, u_fogColor = -1, u_fogStart = -1, u_fogEnd = -1, u_bl = -1, u_blOrg = -1, u_blInv = -1, u_blOn = -1;
 
 struct Breaking
 {
@@ -154,6 +161,13 @@ static int Layer(const char* name)
 
 static void RegisterRedstoneLayers();
 
+struct FireAnim
+{
+	int layer = 0, frames = 0, shown = -1;
+	std::vector<uint8_t> rgba; // the whole strip, 16x16 frames top to bottom
+};
+static FireAnim g_fire[2];
+
 static void BuildTextureArray()
 {
 	if (g_texArray)
@@ -217,6 +231,45 @@ static void BuildTextureArray()
 	if (mcgl::GenerateMipmap)
 		mcgl::GenerateMipmap(GL_TEXTURE_2D_ARRAY);
 	Log("world: texture array with %d layers", n);
+	// fire is animated: keep its strips to step the two layers through their frames (AnimateFire)
+	static const char* fireTex[2] = {"fire_0", "fire_1"};
+	for (int i = 0; i < 2; i++)
+	{
+		g_fire[i].layer = Layer(fireTex[i]);
+		g_fire[i].frames = 0;
+		g_fire[i].shown = -1;
+		mctex::Image img;
+		std::string rel = std::string("block/") + fireTex[i];
+		if (g_fire[i].layer >= n || !mctex::LoadImage(rel.c_str(), img))
+			continue;
+		if (img.w == 16 && img.h % 16 == 0)
+		{
+			g_fire[i].frames = img.h / 16;
+			g_fire[i].rgba.assign(img.rgba, img.rgba + (size_t)img.w * img.h * 4);
+		}
+		img.Free();
+	}
+}
+
+// Minecraft's fire textures run at one frame per tick (fire_0 starts half way through its strip)
+static void AnimateFire()
+{
+	int tick = (int)(gEngfuncs.GetClientTime() * 20.0);
+	bool changed = false;
+	for (int i = 0; i < 2; i++)
+	{
+		FireAnim& f = g_fire[i];
+		if (f.frames <= 0)
+			continue;
+		int frame = (tick + (i == 0 ? f.frames / 2 : 0)) % f.frames;
+		if (frame == f.shown)
+			continue;
+		f.shown = frame;
+		mcgl::TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, f.layer, 16, 16, 1, GL_RGBA, GL_UNSIGNED_BYTE, &f.rgba[(size_t)frame * 16 * 16 * 4]);
+		changed = true;
+	}
+	if (changed && mcgl::GenerateMipmap)
+		mcgl::GenerateMipmap(GL_TEXTURE_2D_ARRAY);
 }
 
 static const char* kVS = R"(#version 330 compatibility
@@ -226,8 +279,10 @@ layout(location = 2) in vec4 aCol;
 out vec3 vUV;
 out vec4 vCol;
 out float vDist;
+out vec3 vPos;
 void main() {
 	gl_Position = gl_ModelViewProjectionMatrix * vec4(aPos, 1.0);
+	vPos = aPos;
 	vUV = aUV;
 	vCol = aCol;
 	vDist = length((gl_ModelViewMatrix * vec4(aPos, 1.0)).xyz);
@@ -243,10 +298,29 @@ in vec3 vUV;
 in vec4 vCol;
 in float vDist;
 out vec4 fragColor;
+uniform sampler3D uBL;
+uniform vec3 uBLOrg;
+uniform vec3 uBLInv;
+uniform float uBLOn;
+in vec3 vPos;
+// Minecraft block light (fire, torches, glowstone): the level half a cell off the surface on the viewer's
+// side, through LightTexture's curve and warm tint. It lifts what is in shade and leaves daylight alone.
+vec3 BlockLight(vec3 base)
+{
+	if (uBLOn <= 0.0)
+		return base;
+	vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+	if (dot(n, gl_ModelViewMatrixInverse[3].xyz - vPos) < 0.0)
+		n = -n;
+	float lv = texture(uBL, (vPos + n * 20.0 - uBLOrg) * uBLInv).r;
+	float b = lv / (4.0 - 3.0 * lv) * uBLOn;
+	vec3 blk = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
+	return min(base + blk, max(base, vec3(1.0)));
+}
 void main() {
 	vec4 t = texture(uTex, vUV);
 	if (t.a < 0.5) discard;
-	vec3 c = t.rgb * vCol.rgb;
+	vec3 c = t.rgb * BlockLight(vCol.rgb);
 	float f = clamp((vDist - uFogStart) / (uFogEnd - uFogStart), 0.0, 1.0);
 	fragColor = vec4(mix(c, uFogColor, f), 1.0);
 }
@@ -264,6 +338,10 @@ static void InitGL()
 	u_fogColor = mcgl::GetUniformLocation(g_prog, "uFogColor");
 	u_fogStart = mcgl::GetUniformLocation(g_prog, "uFogStart");
 	u_fogEnd = mcgl::GetUniformLocation(g_prog, "uFogEnd");
+	u_bl = mcgl::GetUniformLocation(g_prog, "uBL");
+	u_blOrg = mcgl::GetUniformLocation(g_prog, "uBLOrg");
+	u_blInv = mcgl::GetUniformLocation(g_prog, "uBLInv");
+	u_blOn = mcgl::GetUniformLocation(g_prog, "uBLOn");
 	if (mcgl::GenVertexArrays)
 		mcgl::GenVertexArrays(1, &g_vao);
 	BuildTextureArray();
@@ -279,6 +357,10 @@ void WorldUnload()
 	g_chunks.clear();
 	g_cells.clear();
 	g_light.clear();
+	g_bl.clear();
+	g_blOpen.clear();
+	g_blLit.clear();
+	g_blDirty = true;
 	g_loaded = false;
 	if (g_classicMode)
 		ClassicUnload();
@@ -289,7 +371,7 @@ void WorldUnload()
 }
 
 static void ComputeLight();
-
+static int g_blTexDims[3] = {0, 0, 0};
 
 void WorldLoadForMap(const char* mapname)
 {
@@ -355,7 +437,10 @@ void WorldApplyChange(int x, int y, int z, mcw::Cell c)
 	g_w.Set(x, y, z, c);
 	MarkDirtyAround(x, y, z);
 	if (g_classicMode)
+	{
 		ClassicCellChanged(x, y, z);
+		g_blDirty = true;
+	}
 	else
 		g_lightDirty = true;
 }
@@ -371,6 +456,7 @@ void WorldResetCells()
 		c.dirty = true;
 	if (g_classicMode)
 		ClassicResetAll();
+	g_blDirty = true;
 }
 
 void WorldSetBreak(int breaker, int x, int y, int z, int stage)
@@ -489,10 +575,147 @@ static inline float LightAt(int x, int y, int z)
 	return 0.04f + 0.96f * (b * 0.5f + g * 0.5f);
 }
 
+// ---------------------------------------------------------------------------------------------
+// Block light on classic maps. The classic map is lit by its baked lightmaps, which know nothing of a fire
+// or a torch, so their light is kept apart: Minecraft's flood fill over the 40-unit cells (a source's level,
+// one less per cell, stopped by opaque blocks and by cells whose middle is inside the map's solid), held in
+// a 3D texture both renderers sample per pixel. On voxel maps ComputeLight above does it, baked in the mesh.
+static GLuint g_blTex = 0;
+static double g_blNext = 0.0;
+
+static bool BlockLightPasses(size_t i, int x, int y, int z)
+{
+	mcw::Cell c = g_cells[i];
+	if (c)
+		return !Opaque(c); // a placed block, or a dug-out cell
+	uint8_t& o = g_blOpen[i];
+	if (!o)
+	{
+		mcc::Classic* cl = ClassicClient();
+		float p[3] = {g_w.origin[0] + (x + 0.5f) * BS, g_w.origin[1] + (y + 0.5f) * BS, g_w.origin[2] + (z + 0.5f) * BS};
+		o = (cl && cl->PointContents(p) == mcb::CONT_SOLID) ? 2 : 1;
+	}
+	return o == 1;
+}
+
+static void BlockLightUpdate()
+{
+	double now = gEngfuncs.GetClientTime();
+	if (!g_classicMode || !g_blDirty || (now < g_blNext && now > g_blNext - 1.0))
+		return;
+	g_blDirty = false;
+	g_blNext = now + 0.1; // a spreading fire changes cells in bursts: ten updates a second is plenty
+	size_t total = (size_t)g_w.sx * g_w.sy * g_w.sz;
+	bool fresh = g_bl.size() != total;
+	if (fresh)
+	{
+		g_bl.assign(total, 0);
+		g_blOpen.assign(total, 0);
+		g_blLit.clear();
+	}
+	for (uint32_t i : g_blLit)
+		g_bl[i] = 0;
+	g_blLit.clear();
+	std::vector<uint32_t> queue;
+	for (size_t i = 0; i < total; i++)
+		if (g_cells[i])
+			if (int lv = EmitLevel(g_cells[i]))
+			{
+				g_bl[i] = (uint8_t)lv;
+				queue.push_back((uint32_t)i);
+				g_blLit.push_back((uint32_t)i);
+			}
+	static const int d[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+	for (size_t qi = 0; qi < queue.size(); qi++)
+	{
+		uint32_t i = queue[qi];
+		int x = (int)(i % g_w.sx), y = (int)((i / g_w.sx) % g_w.sy), z = (int)(i / ((size_t)g_w.sx * g_w.sy));
+		int lv = g_bl[i] - 1;
+		if (lv <= 0)
+			continue;
+		for (auto& o : d)
+		{
+			int nx = x + o[0], ny = y + o[1], nz = z + o[2];
+			if (!g_w.InBounds(nx, ny, nz))
+				continue;
+			size_t ni = ((size_t)nz * g_w.sy + ny) * g_w.sx + nx;
+			if (g_bl[ni] >= lv || !BlockLightPasses(ni, nx, ny, nz))
+				continue;
+			if (!g_bl[ni])
+				g_blLit.push_back((uint32_t)ni);
+			g_bl[ni] = (uint8_t)lv;
+			queue.push_back((uint32_t)ni);
+		}
+	}
+	if (!mcgl::Ready())
+	{
+		g_blDirty = true;
+		return;
+	}
+	// levels as 0..1 in a one-channel 3D texture (smoothed between cells by the sampler)
+	static std::vector<uint8_t> px;
+	px.assign(total, 0);
+	for (uint32_t i : g_blLit)
+		px[i] = (uint8_t)(g_bl[i] * 17);
+	if (!g_blTex)
+		glGenTextures(1, &g_blTex);
+	glBindTexture(GL_TEXTURE_3D, g_blTex);
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+	if (fresh || g_blTexDims[0] != g_w.sx || g_blTexDims[1] != g_w.sy || g_blTexDims[2] != g_w.sz)
+	{
+		mcgl::TexImage3D(GL_TEXTURE_3D, 0, GL_R8, g_w.sx, g_w.sy, g_w.sz, 0, GL_RED, GL_UNSIGNED_BYTE, px.data());
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+		g_blTexDims[0] = g_w.sx;
+		g_blTexDims[1] = g_w.sy;
+		g_blTexDims[2] = g_w.sz;
+	}
+	else
+		mcgl::TexSubImage3D(GL_TEXTURE_3D, 0, 0, 0, 0, g_w.sx, g_w.sy, g_w.sz, GL_RED, GL_UNSIGNED_BYTE, px.data());
+	glBindTexture(GL_TEXTURE_3D, 0);
+}
+
+// For the shaders: the texture, the grid's corner, 1 / its size in units, and the light's strength (0 = no
+// block light anywhere: skip it). The strength wavers a little, like Minecraft's torch light.
+bool BlockLightTexture(GLuint* tex, float org[3], float inv[3], float* strength)
+{
+	if (!g_loaded || !g_classicMode || !g_blTex || g_blLit.empty())
+		return false;
+	*tex = g_blTex;
+	for (int i = 0; i < 3; i++)
+		org[i] = g_w.origin[i];
+	inv[0] = 1.0f / (g_w.sx * BS);
+	inv[1] = 1.0f / (g_w.sy * BS);
+	inv[2] = 1.0f / (g_w.sz * BS);
+	double t = gEngfuncs.GetClientTime();
+	*strength = 0.97f + 0.03f * (float)(sin(t * 11.3) * sin(t * 6.1));
+	return true;
+}
+
+// Block light as brightness 0..1 at a point (entities, players, the hand)
+static float BlockLightAt(const float* p)
+{
+	if (g_blLit.empty() || g_bl.empty())
+		return 0.0f;
+	int b[3];
+	g_w.ToBlock(p, b);
+	if (!g_w.InBounds(b[0], b[1], b[2]))
+		return 0.0f;
+	float lv = g_bl[((size_t)b[2] * g_w.sy + b[1]) * g_w.sx + b[0]] / 15.0f;
+	return lv / (4.0f - 3.0f * lv);
+}
+
 float WorldLightAtPos(const float* p)
 {
 	if (g_loaded && g_classicMode)
-		return ClassicLightAt(p);
+	{
+		float l = ClassicLightAt(p) + BlockLightAt(p);
+		return l > 1.0f ? 1.0f : l;
+	}
 	if (!g_loaded || g_light.empty())
 		return 1.0f;
 	int b[3];
@@ -686,6 +909,7 @@ static void FindRedstoneTypes()
 {
 	g_tWire = mcw::FindBlock("redstone_wire");
 	g_tTorch = mcw::FindBlock("redstone_torch");
+	g_tPlainTorch = mcw::FindBlock("torch");
 	g_tLever = mcw::FindBlock("lever");
 	g_tStoneButton = mcw::FindBlock("stone_button");
 	g_tOakButton = mcw::FindBlock("oak_button");
@@ -708,6 +932,8 @@ static int EmitLevel(mcw::Cell c)
 		return (mcw::CellState(c) & 1) ? 15 : 0;
 	if (t == g_tTorch)
 		return (mcw::CellState(c) & 8) ? 0 : 7;
+	if (t == g_tPlainTorch)
+		return 14;
 	return (mcw::Block((uint16_t)t).flags & mcw::BF_EMISSIVE) ? 15 : 0;
 }
 
@@ -1020,8 +1246,10 @@ static void MeshRedstone(std::vector<Vtx>& out, int x, int y, int z, const mcw::
 	}
 	case mcw::SHAPE_TORCH:
 	{
-		bool lit = !(state & 8);
-		int ly = lit ? g_lyTorch : g_lyTorchOff;
+		// the plain torch is the same model with its own texture, always lit
+		bool plain = (int)type != g_tTorch;
+		bool lit = plain || !(state & 8);
+		int ly = plain ? g_blockLayers[type].side : lit ? g_lyTorch : g_lyTorchOff;
 		const int layers[6] = {ly, ly, ly, ly, ly, -1};
 		const float lo[3] = {7, 7, 0}, hi[3] = {9, 9, 10};
 		Xf xf = XfId();
@@ -1153,6 +1381,39 @@ static void MeshChunk(int cx, int cy, int cz, std::vector<Vtx>& out)
 				if (mcw::IsRedstoneShape(d.shape))
 				{
 					MeshRedstone(out, x, y, z, d, type, state);
+					continue;
+				}
+				if (d.shape == mcw::SHAPE_FIRE)
+				{
+					// Minecraft's fire on a floor: a sheet of flame leaning in from each side of the cell and
+					// two crossed ones through the middle, taller than the cell, full bright, seen from both sides
+					float x0 = g_w.origin[0] + x * BS, y0 = g_w.origin[1] + y * BS, z0 = g_w.origin[2] + z * BS;
+					auto sheet = [&](float ax, float ay, float bx, float by, float inX, float inY, float h, int layer) {
+						// bottom edge a -> b on the floor, top edge moved in by (inX, inY)
+						const float p[4][3] = {{ax, ay, 0}, {bx, by, 0}, {bx + inX, by + inY, h}, {ax + inX, ay + inY, h}};
+						Vtx v[4];
+						for (int k = 0; k < 4; k++)
+						{
+							v[k].x = x0 + p[k][0] * BS;
+							v[k].y = y0 + p[k][1] * BS;
+							v[k].z = z0 + p[k][2] * BS;
+							v[k].u = (k == 0 || k == 3) ? 0.0f : 1.0f;
+							v[k].v = (k == 2 || k == 3) ? 0.0f : 1.0f;
+							v[k].layer = (float)layer;
+							v[k].r = v[k].g = v[k].b = v[k].a = 255;
+						}
+						const int tri[12] = {0, 1, 2, 0, 2, 3, 0, 2, 1, 0, 3, 2};
+						for (int t : tri)
+							out.push_back(v[t]);
+					};
+					const BlockLayers& bl = g_blockLayers[type];
+					const float e = 0.02f, in = 0.3f, h = 1.4f;
+					sheet(e, 0, e, 1, in, 0, h, bl.side);
+					sheet(1 - e, 1, 1 - e, 0, -in, 0, h, bl.side);
+					sheet(1, e, 0, e, 0, in, h, bl.side);
+					sheet(0, 1 - e, 1, 1 - e, 0, -in, h, bl.side);
+					sheet(0, 0, 1, 1, 0, 0, h, bl.bottom);
+					sheet(0, 1, 1, 0, 0, 0, h, bl.bottom);
 					continue;
 				}
 				// a lit lamp is a light source: full bright like in Minecraft (also on classic maps)
@@ -1361,6 +1622,7 @@ void WorldDraw()
 {
 	if (!g_loaded)
 		return;
+	BlockLightUpdate();
 	if (g_classicMode)
 		ClassicDraw();
 	InitGL();
@@ -1375,7 +1637,24 @@ void WorldDraw()
 		mcgl::BindVertexArray(g_vao);
 	mcgl::ActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D_ARRAY, g_texArray);
+	AnimateFire();
 	mcgl::Uniform1i(u_tex, 0);
+	{
+		GLuint bl = 0;
+		float org[3], inv[3], on = 0.0f;
+		if (BlockLightTexture(&bl, org, inv, &on))
+		{
+			mcgl::ActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_3D, bl);
+			mcgl::ActiveTexture(GL_TEXTURE0);
+			mcgl::Uniform3f(u_blOrg, org[0], org[1], org[2]);
+			mcgl::Uniform3f(u_blInv, inv[0], inv[1], inv[2]);
+		}
+		else
+			on = 0.0f;
+		mcgl::Uniform1i(u_bl, 2);
+		mcgl::Uniform1f(u_blOn, on);
+	}
 	mcgl::Uniform3f(u_fogColor, 0.75f, 0.85f, 1.0f);
 	mcgl::Uniform1f(u_fogStart, 3000.0f);
 	mcgl::Uniform1f(u_fogEnd, 9000.0f);

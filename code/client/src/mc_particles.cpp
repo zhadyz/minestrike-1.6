@@ -227,6 +227,24 @@ void ParticlesSpawn(int kind, const float* origin, int count, int data)
 			p.additive = true;
 			break;
 		}
+		case mcp::PK_FLAME:
+		{
+			// FlameParticle: a small bright flame that drifts up and shrinks away
+			Particle& p = NewP();
+			p.tex = "particle/flame";
+			for (int i = 0; i < 3; i++)
+			{
+				p.pos[i] = origin[i] + RandF(-14.0f, 14.0f);
+				p.vel[i] = RandF(-0.1f, 0.1f) * B;
+			}
+			p.pos[2] += RandF(-10.0f, 24.0f);
+			p.vel[2] = RandF(0.3f, 0.9f) * B;
+			p.drag = 0.96f;
+			p.life = RandF(0.4f, 0.9f);
+			p.size = RandF(0.12f, 0.22f) * B;
+			p.additive = true;
+			break;
+		}
 		case mcp::PK_PORTAL:
 		{
 			// PortalParticle: purple specks that drift back in toward where they were spawned around

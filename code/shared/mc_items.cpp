@@ -98,6 +98,7 @@ const ItemDef g_items[] = {
 	// redstone: block items with a flat icon (texture) where Minecraft draws one
 	{ "redstone", "Redstone Dust", IT_BLOCK, "redstone", 64, 1.f, 4.f, 1.f, 0, 0, 0.f, 0.f, 0, "redstone_wire", nullptr, 0 },
 	{ "redstone_torch", "Redstone Torch", IT_BLOCK, "block/redstone_torch", 64, 1.f, 4.f, 1.f, 0, 0, 0.f, 0.f, 0, "redstone_torch", nullptr, 0 },
+	{ "torch", "Torch", IT_BLOCK, "block/torch", 64, 1.f, 4.f, 1.f, 0, 0, 0.f, 0.f, 0, "torch", nullptr, 0 },
 	{ "lever", "Lever", IT_BLOCK, "block/lever", 64, 1.f, 4.f, 1.f, 0, 0, 0.f, 0.f, 0, "lever", nullptr, 0 },
 	{ "repeater", "Redstone Repeater", IT_BLOCK, "repeater", 64, 1.f, 4.f, 1.f, 0, 0, 0.f, 0.f, 0, "repeater", nullptr, 0 },
 	BLOCKITEM("stone_button", "Stone Button"),

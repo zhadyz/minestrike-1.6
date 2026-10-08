@@ -80,9 +80,15 @@ static void Merge(TraceResult* ptr, const float* v1, const float* v2, const floa
 
 static void W_TraceLine(const float* v1, const float* v2, int noMonsters, edict_t* skip, TraceResult* ptr)
 {
+	// players drawn as Minecraft models are hit where the model is, not where CS's hidden one is (mc_hitbox.cpp)
+	bool rigs = (noMonsters & 0xFF) != ignore_monsters && HitRigsHide(skip);
 	o_TraceLine(v1, v2, noMonsters, skip, ptr);
+	if (rigs)
+		HitRigsRestore();
 	static const float zero[3] = {0, 0, 0};
 	Merge(ptr, v1, v2, zero, zero);
+	if (rigs)
+		HitRigsTrace(v1, v2, ptr);
 }
 
 static void HullSize(int hull, float mins[3], float maxs[3])
@@ -309,6 +315,7 @@ void OnServerActivate()
 	SERVER_COMMAND("exec csmc.cfg\n");
 	SERVER_COMMAND("exec csmc_test.cfg\n");
 	g_worldLoaded = false;
+	FireReset();
 	g_changed.clear();
 	g_pending.clear();
 	mcm::SetWorld(nullptr);
@@ -352,6 +359,7 @@ size_t ChangedCells() { return g_changed.size(); }
 
 void ResetWorld()
 {
+	FireReset();
 	if (!g_worldLoaded || g_changed.empty())
 		return;
 	g_cells = g_originalCells;
@@ -700,7 +708,7 @@ static int YawFacing(float yaw)
 
 // Something to rest on under cell (x,y,z): a solid block below, or the classic map's floor inside the
 // cell (classic surfaces are not on the grid).
-static bool HasFloor(int x, int y, int z)
+bool HasFloor(int x, int y, int z)
 {
 	mcw::Cell below = g_world.Get(x, y, z - 1);
 	if (below && !(g_classicMode && mcw::CellType(below) == g_classic.carvedType))
@@ -820,10 +828,11 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 			return true;
 		}
 	}
-	if (hd.type != mci::IT_BLOCK || !hd.blockName)
+	bool flint = hd.type == mci::IT_FLINT_STEEL;
+	if (!flint && (hd.type != mci::IT_BLOCK || !hd.blockName))
 		return false;
 
-	// place against the hit face
+	// place against the hit face (flint and steel: the fire goes where a block would)
 	static const int off[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
 	int p[3] = {b[0] + off[face][0], b[1] + off[face][1], b[2] + off[face][2]};
 	if (classicHit)
@@ -851,7 +860,7 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 	bool carvedThere = g_classicMode && g_classic.IsCarved(existing);
 	if (carvedThere && mcw::CellType(existing) == g_classic.carvedType)
 		existing = 0; // a dug-out cell is empty
-	if (existing && mcw::Block(mcw::CellType(existing)).shape != mcw::SHAPE_CROSS)
+	if (existing && mcw::Block(mcw::CellType(existing)).shape != mcw::SHAPE_CROSS && mcw::Block(mcw::CellType(existing)).shape != mcw::SHAPE_FIRE)
 	{
 		McLog("place: refused, %d %d %d holds %s", p[0], p[1], p[2], mcw::Block(mcw::CellType(existing)).name);
 		return true;
@@ -866,6 +875,16 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 			McLog("place: refused, %d %d %d centre is inside the classic map", p[0], p[1], p[2]);
 			return true;
 		}
+	}
+	if (flint)
+	{
+		if (FireLight(p[0], p[1], p[2], pl))
+		{
+			FxSound(mcs::MCS_FLINT_USE, BlockCenter(p[0], p[1], p[2]), 1.0f, 0.8f + RANDOM_FLOAT(0.0f, 0.4f));
+			DamageHeld(pl, 1);
+		}
+		FxSwing(pl->entindex());
+		return true;
 	}
 	const uint16_t keepFlag = carvedThere ? mcc::CARVED_FLAG : 0;
 	int type = mcw::FindBlock(hd.blockName);

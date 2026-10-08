@@ -1774,6 +1774,536 @@ static void ScenarioBomb(CBasePlayer* pl)
 	}
 }
 
+// Hit boxes true to the Minecraft models (mc_hitbox.cpp): Steve, a zombie, a creeper and an enderman stand
+// in front of the player. Each one's hit map goes to the log, mc_hitbox_show outlines the boxes over the
+// drawn model (front, then side on), and then the player really fires an AK: at the enderman's head (a
+// whole head above any Counter-Strike hit box), at the edge of Steve's head (wider than a CS one), over the
+// creeper (where a CS head would be) and at the zombie's chest.
+static CBasePlayer* g_hbBot[4];
+static Vector g_hbPos[4];
+static float g_hbTurn = 0.0f;
+static Vector HitboxSpot(CBasePlayer* b, float sidePx, float upPx)
+{
+	float yaw = (b->pev->angles.y + 90.0f) * (float)M_PI / 180.0f;
+	Vector feet = b->pev->origin - Vector(0, 0, 36.0f);
+	return feet + Vector(cosf(yaw), sinf(yaw), 0) * (sidePx * 2.25f) + Vector(0, 0, upPx * 2.25f);
+}
+static void HitboxFire(CBasePlayer* pl, int k, float sidePx, float upPx, const char* what)
+{
+	CBasePlayer* b = g_hbBot[k];
+	CBasePlayerWeapon* w = (CBasePlayerWeapon*)(CBasePlayerItem*)pl->m_pActiveItem;
+	if (!b || !w)
+		return;
+	float hp = b->pev->health;
+	b->m_LastHitGroup = HITGROUP_GENERIC;
+	Look(pl, HitboxSpot(b, sidePx, upPx));
+	pl->pev->punchangle = g_vecZero;
+	w->m_flAccuracy = 0.0f; // dead centre: this tests the boxes, not the spray
+	w->m_flNextPrimaryAttack = 0.0f;
+	w->PrimaryAttack();
+	McLog("test hitbox: %s (%s): hit group %d, hp %.0f -> %.0f", what, STRING(w->pev->classname), b->m_LastHitGroup, hp, b->pev->health);
+}
+static void ScenarioHitbox(CBasePlayer* pl)
+{
+	pl->pev->takedamage = DAMAGE_NO;
+	static const int chars[4] = {1, 3, 6, 7}; // Steve, zombie, creeper, enderman
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		int n = 0;
+		for (int i = 0; i < 4; i++)
+			g_hbBot[i] = nullptr;
+		// enemies first, so the shots do damage; the mob bots keep their own rules (an enderman dodges bullets)
+		for (int pass = 0; pass < 2 && n < 4; pass++)
+			for (int i = 1; i <= gpGlobals->maxClients && n < 4; i++)
+			{
+				CBasePlayer* b = UTIL_PlayerByIndex(i);
+				if (!b || b == pl || !b->IsAlive() || !b->IsBot() || MobOf(b) == MOB_CREEPER || MobOf(b) == MOB_ENDERMAN ||
+					(b->m_iTeam == pl->m_iTeam) != (pass == 1))
+					continue;
+				g_hbBot[n++] = b;
+			}
+		// in the first of eight directions where all four spots are in the open
+		Vector f, r;
+		for (int turn = 0; turn < 8; turn++)
+		{
+			float yaw = pl->pev->angles.y + turn * 45.0f;
+			UTIL_MakeVectors(Vector(0, yaw, 0));
+			f = gpGlobals->v_forward;
+			r = gpGlobals->v_right;
+			bool clear = true;
+			for (int k = 0; k < 4 && clear; k++)
+			{
+				TraceResult tr;
+				UTIL_TraceHull(pl->pev->origin, pl->pev->origin + f * 190.0f + r * ((k - 1.5f) * 70.0f), ignore_monsters, human_hull, pl->edict(), &tr);
+				clear = tr.flFraction >= 1.0f && !tr.fStartSolid;
+			}
+			if (clear)
+			{
+				pl->pev->angles = pl->pev->v_angle = Vector(0, yaw, 0);
+				pl->pev->fixangle = 1;
+				break;
+			}
+		}
+		for (int k = 0; k < n; k++)
+		{
+			g_hbPos[k] = pl->pev->origin + f * 190.0f + r * ((k - 1.5f) * 70.0f);
+			UTIL_SetOrigin(g_hbBot[k]->pev, g_hbPos[k]);
+			SetCharacter(g_hbBot[k], chars[k]);
+			g_hbBot[k]->pev->health = 100.0f;
+		}
+		g_hbTurn = 0.0f;
+		pl->GiveNamedItem("weapon_ak47");
+		pl->GiveAmmo(90, "762Nato", 90);
+		McLog("test hitbox: %d bots lined up (%d enemies of the player)", n, (int)(n > 0 && g_hbBot[0]->m_iTeam != pl->m_iTeam));
+	}
+	for (int k = 0; k < 4; k++)
+	{
+		CBasePlayer* b = g_hbBot[k];
+		if (!b || !b->IsAlive())
+			continue;
+		// frozen bots keep their own view: pin them and turn them to the player (plus the timeline's turn)
+		Vector o = b->pev->origin;
+		o.x = g_hbPos[k].x;
+		o.y = g_hbPos[k].y;
+		UTIL_SetOrigin(b->pev, o);
+		b->pev->velocity.x = b->pev->velocity.y = 0.0f;
+		Vector to = pl->pev->origin - b->pev->origin;
+		float yaw = atan2f(to.y, to.x) * 180.0f / (float)M_PI + g_hbTurn;
+		static_cast<CCSBot*>(b)->SetLookAngles(yaw, 0.0f);
+		b->pev->v_angle = b->pev->angles = Vector(0, yaw, 0);
+	}
+	if (Hit(0.8f))
+	{
+		// armor wear keeps Minecraft's half-second window however fast the bullets come: ten in one frame
+		// cost a piece 1, and a bigger hit inside the window only tops that up (115 damage: 5 in all)
+		McPlayer& mp = P(pl);
+		static const char* parts[4] = {"iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots"};
+		for (int i = 0; i < 4; i++)
+		{
+			mp.armor[i].id = (uint16_t)mci::FindItem(parts[i]);
+			mp.armor[i].count = 1;
+			mp.armor[i].damage = 0;
+		}
+		mp.armorWearUntil = 0.0f;
+		pl->pev->takedamage = DAMAGE_YES;
+		for (int n = 0; n < 10; n++)
+		{
+			pl->pev->health = 100.0f;
+			pl->TakeDamage(VARS(INDEXENT(0)), VARS(INDEXENT(0)), 36.0f, DMG_BULLET);
+		}
+		int burst = mp.armor[0].damage;
+		float hpAfter = pl->pev->health;
+		pl->pev->health = 100.0f;
+		pl->TakeDamage(VARS(INDEXENT(0)), VARS(INDEXENT(0)), 115.0f, DMG_BULLET);
+		McLog("test hitbox: armor wear: 10 bullets in one window cost the helmet %d (each still hurt: 100 -> %.0f hp), then a 115-damage hit: %d in all (want 1, then 5)",
+			burst, hpAfter, mp.armor[0].damage);
+		pl->pev->health = 100.0f;
+		pl->pev->takedamage = DAMAGE_NO;
+		for (int i = 0; i < 4; i++)
+			mp.armor[i] = mci::Stack();
+		mp.invDirty = mp.statDirty = true;
+	}
+	if (Hit(1.0f))
+		CLIENT_COMMAND(pl->edict(), (char*)"weapon_ak47\n");
+	if (Hit(1.5f))
+	{
+		for (int k = 0; k < 4; k++)
+			if (g_hbBot[k])
+			{
+				HitRigsLogMap(pl, g_hbBot[k], 0.0f);
+				if (k == 0 || k == 3)
+					HitRigsLogMap(pl, g_hbBot[k], 90.0f);
+			}
+		CVAR_SET_FLOAT("mc_hitbox_show", 1.0f);
+		// bots: the zombie aims the way cs_bot_update.cpp does (turn from the origin, fire from the eyes) at
+		// Steve, the creeper and the enderman; the shot must land on the head, or the chest when it asks for that
+		CBasePlayer* bot = g_hbBot[1];
+		for (int k = 0; k < 4 && bot; k++)
+			for (int head = 1; head >= 0 && k != 1 && g_hbBot[k]; head--)
+			{
+				Vector spot = g_hbBot[k]->pev->origin;
+				bool rig = BotAimAtRig(bot, g_hbBot[k], head != 0, spot);
+				Vector eye = bot->pev->origin + bot->pev->view_ofs;
+				TraceResult tr;
+				UTIL_TraceLine(eye, eye + (spot - bot->pev->origin).Normalize() * 2000.0f, dont_ignore_monsters, bot->edict(), &tr);
+				McLog("test hitbox: bot aiming at the %s of %s: rig %d, the shot hits %s, group %d (want %d)", head ? "head" : "chest",
+					mcp::kCharacters[chars[k]].name, (int)rig, tr.pHit == g_hbBot[k]->edict() ? "it" : "something else", tr.iHitgroup, head ? 1 : 2);
+			}
+	}
+	// the boxes over each model: facing the camera, then side on
+	for (int v = 0; v < 8; v++)
+	{
+		float t0 = 2.0f + v * 2.3f;
+		int k = v & 3;
+		if (!g_hbBot[k])
+			continue;
+		if (Hit(t0))
+		{
+			g_hbTurn = v < 4 ? 0.0f : 90.0f;
+			Look(pl, HitboxSpot(g_hbBot[k], 0.0f, k == 3 ? 26.0f : 18.0f));
+		}
+		if (Hit(t0 + 1.1f))
+			McLog("SHOT hitbox_%s_%d", v < 4 ? "front" : "side", k);
+	}
+	float tf = 2.0f + 8 * 2.3f;
+	if (Hit(tf))
+	{
+		g_hbTurn = 0.0f;
+		CVAR_SET_FLOAT("mc_hitbox_show", 0.0f);
+	}
+	if (Hit(tf + 0.6f))
+		HitboxFire(pl, 3, 0.0f, 41.0f, "enderman, middle of its head");
+	if (Hit(tf + 1.0f))
+		HitboxFire(pl, 0, 3.4f, 28.0f, "Steve, the edge of his head");
+	if (Hit(tf + 1.4f))
+		HitboxFire(pl, 2, 0.0f, 29.0f, "creeper, just over its head (a miss)");
+	if (Hit(tf + 1.8f))
+		HitboxFire(pl, 1, 0.0f, 19.0f, "zombie, chest");
+	if (Hit(tf + 2.2f))
+		HitboxFire(pl, 2, 0.0f, 22.0f, "creeper, head");
+	if (Hit(tf + 3.0f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 0.0f);
+		McLog("SHOT end");
+	}
+}
+
+// Flint and steel (mc_fire.cpp) on the classic map: the nearest crate is lit with the real use action and
+// burns away, then the nearest wooden door; last the player stands in a fire. The log counts the flames and
+// what is left of the wood each second.
+extern mcc::Classic* ClassicWorld();
+extern bool HasFloor(int x, int y, int z);
+static int g_fireCell[3], g_fireDir[3];
+static Vector g_fireStand;
+static Vector FireCellCenter(const int c[3])
+{
+	return Vector(g_world.origin[0] + (c[0] + 0.5f) * 40.0f, g_world.origin[1] + (c[1] + 0.5f) * 40.0f, g_world.origin[2] + (c[2] + 0.5f) * 40.0f);
+}
+// the nearest cell of that material with open floor beside it and room to stand two cells out
+static bool FindBurnable(CBasePlayer* pl, int material)
+{
+	mcc::Classic* cl = ClassicWorld();
+	if (!cl)
+		return false;
+	float o[3] = {pl->pev->origin.x, pl->pev->origin.y, pl->pev->origin.z};
+	int c0[3];
+	g_world.ToBlock(o, c0);
+	float best = 1e9f;
+	static const int dirs[4][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}};
+	for (int dz = -5; dz <= 6; dz++)
+		for (int dy = -45; dy <= 45; dy++)
+			for (int dx = -45; dx <= 45; dx++)
+			{
+				int c[3] = {c0[0] + dx, c0[1] + dy, c0[2] + dz};
+				float d = (float)(dx * dx + dy * dy + dz * dz * 9);
+				if (d >= best || !g_world.InBounds(c[0], c[1], c[2]) || !cl->Diggable(c[0], c[1], c[2]) ||
+					cl->Info(c[0], c[1], c[2]).material != material)
+					continue;
+				for (const auto& dir : dirs)
+				{
+					int n[3] = {c[0] + dir[0], c[1] + dir[1], c[2] + dir[2]};
+					if (!g_world.InBounds(n[0], n[1], n[2]) || g_world.Get(n[0], n[1], n[2]) || !HasFloor(n[0], n[1], n[2]))
+						continue;
+					Vector nc = FireCellCenter(n);
+					float np[3] = {nc.x, nc.y, nc.z};
+					if (cl->PointContents(np) == mcb::CONT_SOLID)
+						continue;
+					Vector stand = nc + Vector((float)dir[0], (float)dir[1], 0) * 70.0f + Vector(0, 0, 20);
+					TraceResult tr;
+					UTIL_TraceHull(stand, stand, ignore_monsters, human_hull, pl->edict(), &tr);
+					if (tr.fStartSolid || tr.fAllSolid)
+						continue;
+					UTIL_TraceLine(stand, FireCellCenter(c), ignore_monsters, pl->edict(), &tr);
+					if ((tr.vecEndPos - FireCellCenter(c)).Length() > 40.0f)
+						continue; // something else in the way
+					best = d;
+					memcpy(g_fireCell, c, sizeof(g_fireCell));
+					memcpy(g_fireDir, dir, sizeof(g_fireDir));
+					g_fireStand = stand;
+					break;
+				}
+			}
+	return best < 1e9f;
+}
+static int WoodLeft(int material)
+{
+	mcc::Classic* cl = ClassicWorld();
+	int n = 0;
+	for (int dz = -4; dz <= 4 && cl; dz++)
+		for (int dy = -4; dy <= 4; dy++)
+			for (int dx = -4; dx <= 4; dx++)
+			{
+				int x = g_fireCell[0] + dx, y = g_fireCell[1] + dy, z = g_fireCell[2] + dz;
+				n += (g_world.InBounds(x, y, z) && cl->Diggable(x, y, z) && cl->Info(x, y, z).material == material) ? 1 : 0;
+			}
+	return n;
+}
+static void ScenarioFire(CBasePlayer* pl)
+{
+	float now = gpGlobals->time - g_testStart;
+	static bool burnTest = false, found = false;
+	if (!burnTest)
+		pl->pev->takedamage = DAMAGE_NO;
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		CVAR_SET_FLOAT("mc_fire_speed", 1.0f);
+		burnTest = false;
+	}
+	// stand in front of the nearest crate / door, light it with a real use, step back and watch
+	auto begin = [&](float t, int material, const char* what) {
+		if (Hit(t))
+		{
+			found = FindBurnable(pl, material);
+			McLog("test fire: %s %s at %d %d %d (%d cells of it around)", what, found ? "found" : "NOT found", g_fireCell[0], g_fireCell[1], g_fireCell[2],
+				found ? WoodLeft(material) : 0);
+			if (found)
+			{
+				UTIL_SetOrigin(pl->pev, g_fireStand);
+				pl->pev->velocity = g_vecZero;
+				SelectItemByName(pl, "flint_and_steel");
+			}
+		}
+		if (!found)
+			return;
+		if (now >= t && now < t + 3.5f)
+			Look(pl, FireCellCenter(g_fireCell));
+		if (Hit(t + 1.2f))
+			McLog("SHOT fire_%s_before", what);
+		if (Hit(t + 3.4f))
+		{
+			bool ok = UseBlockTarget(pl, HeldStack(pl));
+			McLog("test fire: flint and steel on the %s -> %d, flames %d", what, (int)ok, FireCount());
+			Vector back = g_fireStand + Vector((float)g_fireDir[0], (float)g_fireDir[1], 0) * 60.0f;
+			TraceResult tr;
+			UTIL_TraceHull(g_fireStand, back, ignore_monsters, human_hull, pl->edict(), &tr);
+			UTIL_SetOrigin(pl->pev, tr.vecEndPos);
+		}
+	};
+	auto watch = [&](float from, float to, float every, int material, const char* what) {
+		if (!found || now < from || now > to)
+			return;
+		Look(pl, FireCellCenter(g_fireCell) + Vector(0, 0, 20));
+		for (float t = from; t <= to; t += every)
+			if (Hit(t))
+				McLog("test fire: %s at %.0f s (speed %.0f): flames %d, %s cells left %d", what, t, CVAR_GET_FLOAT("mc_fire_speed"), FireCount(), what,
+					WoodLeft(material));
+	};
+
+	// the crate, at Minecraft's own pace: after 45 seconds it has barely caught
+	begin(1.0f, mcc::MAT_WOOD, "crate");
+	watch(5.0f, 50.0f, 5.0f, mcc::MAT_WOOD, "crate");
+	if (Hit(7.0f))
+		McLog("SHOT fire_crate_lit");
+	if (Hit(27.0f))
+		McLog("SHOT fire_crate_25s");
+	if (Hit(47.0f))
+		McLog("SHOT fire_crate_45s");
+	// the same fire eight times as fast, to see where it ends
+	if (Hit(50.0f))
+		CVAR_SET_FLOAT("mc_fire_speed", 8.0f);
+	watch(55.0f, 75.0f, 5.0f, mcc::MAT_WOOD, "crate");
+	if (Hit(62.0f))
+		McLog("SHOT fire_crate_fast_1");
+	if (Hit(73.0f))
+		McLog("SHOT fire_crate_fast_2");
+	// a door (still eight times as fast)
+	begin(76.0f, mcc::MAT_DOOR, "door");
+	watch(80.0f, 100.0f, 2.5f, mcc::MAT_DOOR, "door");
+	if (Hit(82.0f))
+		McLog("SHOT fire_door_lit");
+	if (Hit(90.0f))
+		McLog("SHOT fire_door_later");
+	if (Hit(98.5f))
+		McLog("SHOT fire_door_end");
+
+	// standing in a fire lit under the feet on open ground, with no armor; then stepping out of it
+	static float hp0 = 0.0f;
+	static Vector burnAt;
+	if (Hit(101.0f))
+	{
+		CVAR_SET_FLOAT("mc_fire_speed", 1.0f);
+		McPlayer& mp = P(pl);
+		for (int i = 0; i < mci::NUM_ARMOR_SLOTS; i++)
+			mp.armor[i] = mci::Stack();
+		mp.invDirty = mp.statDirty = true;
+		burnAt = pl->pev->origin;
+		float o[3] = {burnAt.x, burnAt.y, burnAt.z - 30.0f};
+		int c[3];
+		g_world.ToBlock(o, c);
+		burnTest = true;
+		pl->pev->takedamage = DAMAGE_YES;
+		pl->pev->health = hp0 = 100.0f;
+		bool ok = FireLight(c[0], c[1], c[2], nullptr);
+		McLog("test fire: fire under the player -> %d", (int)ok);
+	}
+	if (Hit(102.4f))
+		McLog("SHOT fire_player");
+	if (Hit(103.2f))
+	{
+		McLog("test fire: 2.2 s in the fire: hp %.0f -> %.0f (want about 75)", hp0, pl->pev->health);
+		hp0 = pl->pev->health;
+		// out of the fire: 150 units back the way the player came
+		Vector away = burnAt + Vector((float)g_fireDir[0], (float)g_fireDir[1], 0) * 150.0f;
+		TraceResult tr;
+		UTIL_TraceHull(burnAt, away, ignore_monsters, human_hull, pl->edict(), &tr);
+		UTIL_SetOrigin(pl->pev, tr.vecEndPos);
+	}
+	if (Hit(106.4f))
+		McLog("test fire: 3.2 s after stepping out, still alight: hp %.0f -> %.0f (want about 15 less)", hp0, pl->pev->health);
+	if (Hit(107.0f))
+	{
+		burnTest = false;
+		pl->pev->health = 100.0f;
+		P(pl).fireUntil = 0.0f;
+		CVAR_SET_FLOAT("bot_stop", 0.0f);
+		McLog("test fire: flames at the end %d", FireCount());
+		McLog("SHOT end");
+	}
+}
+
+// Light (client block light on classic maps) and torches: in the darkest part of the map the bots know by
+// name (a tunnel), a torch goes down, then a second one on a block that is then taken away (the torch pops
+// off), then a fire. The screenshots show the dark, each light, and the dark again.
+static void ScenarioLight(CBasePlayer* pl)
+{
+	pl->pev->takedamage = DAMAGE_NO;
+	static Vector fwd;
+	static int torchCell[3], propCell[3], fireCell[3];
+	static bool ok = false;
+	auto cellAt = [](const Vector& p, int c[3]) {
+		float o[3] = {p.x, p.y, p.z};
+		g_world.ToBlock(o, c);
+	};
+	if (Hit(0.5f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 1.0f);
+		CVAR_SET_FLOAT("mc_fire_speed", 1.0f);
+		// indoors: the roomiest nav area with the classic map's solid close overhead (a tunnel)
+		CNavArea* best = nullptr;
+		float bestSize = 0.0f;
+		const char* bestName = "covered area";
+		mcc::Classic* cl = ClassicWorld();
+		for (CNavArea* a : TheNavAreaList)
+		{
+			float size = min(a->GetSizeX(), a->GetSizeY());
+			if (size <= bestSize || !cl)
+				continue;
+			bool covered = true;
+			for (int k = 0; k < 5 && covered; k++)
+			{
+				// overhead at the middle and towards the four corners
+				Vector at = *a->GetCenter() + Vector(k == 1 || k == 2 ? size * 0.3f : k ? -size * 0.3f : 0.0f, k == 1 || k == 3 ? size * 0.3f : k ? -size * 0.3f : 0.0f, 40.0f);
+				float s0[3] = {at.x, at.y, at.z}, e0[3] = {at.x, at.y, at.z + 200.0f}, zero[3] = {0, 0, 0};
+				mcc::Result r;
+				cl->Trace(s0, e0, zero, zero, r);
+				float above[3] = {r.endpos[0], r.endpos[1], r.endpos[2] + 12.0f};
+				covered = r.hit && !r.startsolid && cl->PointContents(above) == mcb::CONT_SOLID;
+			}
+			if (covered)
+			{
+				bestSize = size;
+				best = a;
+			}
+		}
+		// (a voxel map has no classic solid to look for: the lights go where the player stands)
+		ok = true;
+		McLog("test light: %s (%s, %.0f units wide)", best ? "tunnel found" : "no covered area, staying put", bestName, bestSize);
+		{
+			Vector at = best ? *best->GetCenter() + Vector(0, 0, 37) : pl->pev->origin;
+			UTIL_SetOrigin(pl->pev, at);
+			pl->pev->velocity = g_vecZero;
+			// face the way with the most room
+			float bestD = 0.0f, yaw = 0.0f;
+			for (int k = 0; k < 8; k++)
+			{
+				float a = k * 45.0f * (float)M_PI / 180.0f;
+				TraceResult tr;
+				UTIL_TraceLine(at, at + Vector(cosf(a), sinf(a), 0) * 900.0f, ignore_monsters, pl->edict(), &tr);
+				if (tr.flFraction > bestD)
+				{
+					bestD = tr.flFraction;
+					yaw = k * 45.0f;
+				}
+			}
+			fwd = Vector(cosf(yaw * (float)M_PI / 180.0f), sinf(yaw * (float)M_PI / 180.0f), 0);
+			pl->pev->angles = pl->pev->v_angle = Vector(8.0f, yaw, 0);
+			pl->pev->fixangle = 1;
+			Vector side(-fwd.y, fwd.x, 0);
+			cellAt(at + fwd * 150.0f - Vector(0, 0, 30), torchCell);
+			cellAt(at + fwd * 230.0f + side * 60.0f - Vector(0, 0, 30), propCell);
+			cellAt(at + fwd * 260.0f - Vector(0, 0, 30), fireCell);
+		}
+	}
+	if (!ok)
+	{
+		if (Hit(2.0f))
+			McLog("SHOT end");
+		return;
+	}
+	int torch = mcw::FindBlock("torch");
+	if (Hit(2.0f))
+		McLog("SHOT light_0_dark");
+	if (Hit(4.2f))
+	{
+		SetBlock(torchCell[0], torchCell[1], torchCell[2], mcw::MakeCell((uint16_t)torch, 0));
+		McLog("test light: torch on the floor at %d %d %d (floor under it %d)", torchCell[0], torchCell[1], torchCell[2],
+			(int)HasFloor(torchCell[0], torchCell[1], torchCell[2]));
+	}
+	if (Hit(5.6f))
+		McLog("SHOT light_1_torch");
+	// torch physics: a torch on a block, and the block goes
+	if (Hit(7.8f))
+	{
+		// (two blocks: the map's floor does not sit on the grid, and a torch counts a floor half a cell down as its own)
+		SetBlock(propCell[0], propCell[1], propCell[2], mcw::MakeCell((uint16_t)mcw::FindBlock("cobblestone"), 0));
+		SetBlock(propCell[0], propCell[1], propCell[2] + 1, mcw::MakeCell((uint16_t)mcw::FindBlock("cobblestone"), 0));
+		SetBlock(propCell[0], propCell[1], propCell[2] + 2, mcw::MakeCell((uint16_t)torch, 0));
+	}
+	if (Hit(9.2f))
+		McLog("SHOT light_2_torch_on_block");
+	if (Hit(11.4f))
+	{
+		SetBlock(propCell[0], propCell[1], propCell[2], 0);
+		SetBlock(propCell[0], propCell[1], propCell[2] + 1, 0);
+		McLog("test light: the blocks under the second torch are gone");
+	}
+	if (Hit(12.4f))
+		McLog("test light: the second torch's cell now holds %s (want air: it popped off)",
+			mcw::Block(mcw::CellType(g_world.Get(propCell[0], propCell[1], propCell[2] + 2))).name);
+	if (Hit(12.8f))
+		McLog("SHOT light_3_torch_popped");
+	if (Hit(15.0f))
+	{
+		// the first cell further in that takes a fire (the floor slopes)
+		bool lit = false;
+		for (int step = 0; step < 12 && !lit; step++)
+			for (int up = -1; up <= 1 && !lit; up++)
+			{
+				cellAt(pl->pev->origin + fwd * (170.0f + step * 20.0f) + Vector(0, 0, -30.0f + up * 30.0f), fireCell);
+				lit = FireLight(fireCell[0], fireCell[1], fireCell[2], nullptr);
+			}
+		McLog("test light: fire further in -> %d at %d %d %d", (int)lit, fireCell[0], fireCell[1], fireCell[2]);
+	}
+	if (Hit(16.4f))
+		McLog("SHOT light_4_fire");
+	// everything out: dark again
+	if (Hit(18.6f))
+	{
+		SetBlock(torchCell[0], torchCell[1], torchCell[2], 0);
+		SetBlock(fireCell[0], fireCell[1], fireCell[2], 0);
+		McLog("test light: lights out");
+	}
+	if (Hit(20.0f))
+		McLog("SHOT light_5_dark_again");
+	if (Hit(22.2f))
+	{
+		CVAR_SET_FLOAT("bot_stop", 0.0f);
+		McLog("SHOT end");
+	}
+}
+
 void TestMapChanged()
 {
 	g_testStart = -1.0f;
@@ -1853,6 +2383,12 @@ void TestFrame()
 		ScenarioLab(pl);
 	else if (!strcmp(name, "bomb"))
 		ScenarioBomb(pl);
+	else if (!strcmp(name, "hitbox"))
+		ScenarioHitbox(pl);
+	else if (!strcmp(name, "fire"))
+		ScenarioFire(pl);
+	else if (!strcmp(name, "light"))
+		ScenarioLight(pl);
 	g_prevNow = gpGlobals->time - g_testStart;
 }
 } // namespace mc

@@ -36,7 +36,8 @@ struct MipGL
 static std::vector<MipGL> g_mips;
 static int g_oreLayer[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
 static GLuint g_texArr = 0, g_lmTex = 0, g_prog = 0, g_vao = 0;
-static GLint u_tex = -1, u_lm = -1, u_scale = -1, u_gamma = -1, u_texGamma = -1;
+static GLint u_tex = -1, u_lm = -1, u_scale = -1, u_gamma = -1, u_texGamma = -1, u_bl = -1, u_blOrg = -1, u_blInv = -1, u_blOn = -1;
+bool BlockLightTexture(GLuint* tex, float org[3], float inv[3], float* strength); // mc_world_cl.cpp
 static const int TEXDIM = 256;
 static const int ATLAS = 2048;
 
@@ -820,9 +821,11 @@ in vec3 aUV;
 in vec3 aLM;
 out vec3 vUV;
 out vec3 vLM;
+out vec3 vPos;
 void main()
 {
 	gl_Position = gl_ModelViewProjectionMatrix * vec4(aPos, 1.0);
+	vPos = aPos;
 	vUV = aUV;
 	vLM = aLM;
 }
@@ -837,13 +840,32 @@ uniform float uTexGamma;
 in vec3 vUV;
 in vec3 vLM;
 out vec4 fragColor;
+uniform sampler3D uBL;
+uniform vec3 uBLOrg;
+uniform vec3 uBLInv;
+uniform float uBLOn;
+in vec3 vPos;
+// Minecraft block light (fire, torches, glowstone): the level half a cell off the surface on the viewer's
+// side, through LightTexture's curve and warm tint. It lifts what is in shade and leaves daylight alone.
+vec3 BlockLight(vec3 base)
+{
+	if (uBLOn <= 0.0)
+		return base;
+	vec3 n = normalize(cross(dFdx(vPos), dFdy(vPos)));
+	if (dot(n, gl_ModelViewMatrixInverse[3].xyz - vPos) < 0.0)
+		n = -n;
+	float lv = texture(uBL, (vPos + n * 20.0 - uBLOrg) * uBLInv).r;
+	float b = lv / (4.0 - 3.0 * lv) * uBLOn;
+	vec3 blk = vec3(b, b * ((b * 0.6 + 0.4) * 0.6 + 0.4), b * (b * b * 0.6 + 0.4));
+	return min(base + blk, max(base, vec3(1.0)));
+}
 void main()
 {
 	vec4 t = texture(uTex, vUV);
 	if (t.a < 0.5)
 		discard;
 	vec3 l = vLM.x >= 0.0 ? texture(uLM, vLM.xy).rgb : vec3(vLM.z);
-	l = pow(l, vec3(uGamma)) * uScale;
+	l = BlockLight(pow(l, vec3(uGamma)) * uScale);
 	fragColor = vec4(min(pow(t.rgb, vec3(uTexGamma)) * l, vec3(1.0)), 1.0);
 }
 )";
@@ -867,6 +889,10 @@ static bool InitGL()
 	u_scale = mcgl::GetUniformLocation(g_prog, "uScale");
 	u_gamma = mcgl::GetUniformLocation(g_prog, "uGamma");
 	u_texGamma = mcgl::GetUniformLocation(g_prog, "uTexGamma");
+	u_bl = mcgl::GetUniformLocation(g_prog, "uBL");
+	u_blOrg = mcgl::GetUniformLocation(g_prog, "uBLOrg");
+	u_blInv = mcgl::GetUniformLocation(g_prog, "uBLInv");
+	u_blOn = mcgl::GetUniformLocation(g_prog, "uBLOn");
 	if (mcgl::GenVertexArrays)
 		mcgl::GenVertexArrays(1, &g_vao);
 	return true;
@@ -991,6 +1017,21 @@ void ClassicDraw()
 	mcgl::Uniform1f(u_gamma, g_cvGamma ? g_cvGamma->value : 0.75f);
 	mcgl::Uniform1f(u_scale, g_cvScale ? g_cvScale->value : 1.55f);
 	mcgl::Uniform1f(u_texGamma, g_cvTexGamma ? g_cvTexGamma->value : 0.85f);
+	{
+		GLuint bl = 0;
+		float org[3], inv[3], on = 0.0f;
+		if (BlockLightTexture(&bl, org, inv, &on))
+		{
+			mcgl::ActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_3D, bl);
+			mcgl::Uniform3f(u_blOrg, org[0], org[1], org[2]);
+			mcgl::Uniform3f(u_blInv, inv[0], inv[1], inv[2]);
+		}
+		else
+			on = 0.0f;
+		mcgl::Uniform1i(u_bl, 2);
+		mcgl::Uniform1f(u_blOn, on);
+	}
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_TRUE);

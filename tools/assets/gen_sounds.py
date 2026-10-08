@@ -83,6 +83,9 @@ EVENTS = [
     ('CROSSBOW_LOAD_START', 'item.crossbow.loading_start'),
     ('CROSSBOW_LOAD_END', 'item.crossbow.loading_end'),
     ('CROSSBOW_SHOOT', 'item.crossbow.shoot'),
+    ('FLINT_USE', 'item.flintandsteel.use'),
+    ('FIRE_AMBIENT', 'block.fire.ambient'),
+    ('PLAYER_HURT_FIRE', 'entity.player.hurt_on_fire'),
 ]
 # Block sound groups, in the order of mcw::SOUND_* in mc_blocks.h
 GROUPS = ['stone', 'wood', 'sand', 'gravel', 'grass', 'glass', 'metal', 'wool']

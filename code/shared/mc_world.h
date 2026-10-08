@@ -59,6 +59,7 @@ enum ShapeKind : uint8_t
 	SHAPE_BUTTON,
 	SHAPE_PLATE,
 	SHAPE_REPEATER,
+	SHAPE_FIRE, // flames: no collision, not targeted (the crosshair goes through to what burns)
 };
 
 inline bool IsRedstoneShape(ShapeKind s) { return s >= SHAPE_DUST && s <= SHAPE_REPEATER; }

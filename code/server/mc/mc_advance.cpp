@@ -108,6 +108,14 @@ void DeathMessage(CBasePlayer* victim, entvars_t* attackerVars, entvars_t* infli
 			ToastAll(0, "%s blew up", v); // death.attack.explosion
 		return;
 	}
+	if (bits & DMG_BURN)
+	{
+		if (a)
+			ToastAll(0, "%s was burned to a crisp while fighting %s", v, a); // death.attack.onFire.player
+		else
+			ToastAll(0, "%s went up in flames", v); // death.attack.inFire
+		return;
+	}
 	if (inflictor && inflictor != attacker && FClassnameIs(inflictor->pev, "mc_arrow"))
 	{
 		ToastAll(0, a ? "%s was shot by %s" : "%s was shot", v, a); // death.attack.arrow

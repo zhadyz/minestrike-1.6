@@ -1,5 +1,5 @@
-// Minecraft humanoid rendering for players and bots (replaces CS player models on screen; hit boxes
-// stay CS's). Port of HumanoidModel/PlayerModel geometry + setupAnim, armor layers, held items, and
+// Minecraft humanoid rendering for players and bots (replaces CS player models on screen; the server
+// hit-tests the same cubes, mc_hitbox.cpp: keep the two in step). Port of HumanoidModel/PlayerModel geometry + setupAnim, armor layers, held items, and
 // Counter-Strike guns turned into Minecraft-style extruded items built from their HUD icons.
 #include "mc_blocks.h"
 #include "mc_chars.h"

@@ -15,19 +15,21 @@
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/06-survival-dark.jpg"><img alt="Inventory, hunger and regeneration. The survival inventory (Shift+E) implements Minecraft's click semantics. Left-click picks up, places or swaps a stack. Right-click splits a stack or places a single item. Shift-click moves a stack to its preferred destination: armor to the armor slots, hotbar to s" src="docs/readme/06-survival-light.jpg" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/07-play-dark.png"><img alt="Launch configurations and controls. Three launchers in the repository root start a local, offline listen server with bots:" src="docs/readme/07-play-light.png" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/07-combat-dark.jpg"><img alt="Hit boxes, fire and block light. Three places where Counter-Strike's rules disagreed with what the player sees, or with Minecraft's own rules, were resolved in favour of the latter." src="docs/readme/07-combat-light.jpg" width="100%"></picture>
 
-<a href="docs/report/media/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/08-clips-dark.jpg"><img alt="Scripted scenarios. Each recording is a scripted scenario executed in the unmodified engine and captured from the game window. The server drives the local player. No frame was edited." src="docs/readme/08-clips-light.jpg" width="100%"></picture></a>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/08-play-dark.png"><img alt="Launch configurations and controls. Three launchers in the repository root start a local, offline listen server with bots:" src="docs/readme/08-play-light.png" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/09-stills-dark.jpg"><img alt="Models and interface. Figure 10. Elytra in third person, posed as in ElytraModel." src="docs/readme/09-stills-light.jpg" width="100%"></picture>
+<a href="docs/report/media/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/09-clips-dark.jpg"><img alt="Scripted scenarios. Each recording is a scripted scenario executed in the unmodified engine and captured from the game window. The server drives the local player. No frame was edited." src="docs/readme/09-clips-light.jpg" width="100%"></picture></a>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/10-how-dark.png"><img alt="Components and toolchain. clang-cl and lld cross-compile 32-bit Windows libraries against the MSVC runtime and Windows SDK, obtained with xwin. No Visual Studio installation is required. CMake and Ninja drive the build." src="docs/readme/10-how-light.png" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/10-stills-dark.jpg"><img alt="Models and interface. Figure 13. Elytra in third person, posed as in ElytraModel." src="docs/readme/10-stills-light.jpg" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/11-verification-dark.png"><img alt="Methodology and results. Collision was checked against the engine directly. With the engine running the real de_dust2, mc_bsptest fires randomized traces through both the engine's trace function and the modification's, and compares the end position, the start-solid flag, the surface normal and the p" src="docs/readme/11-verification-light.png" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/11-how-dark.png"><img alt="Components and toolchain. clang-cl and lld cross-compile 32-bit Windows libraries against the MSVC runtime and Windows SDK, obtained with xwin. No Visual Studio installation is required. CMake and Ninja drive the build." src="docs/readme/11-how-light.png" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/12-next-dark.png"><img alt="In progress. Minecraft music, played with Minecraft's track selection and silence intervals." src="docs/readme/12-next-light.png" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/12-verification-dark.png"><img alt="Methodology and results. Collision was checked against the engine directly. With the engine running the real de_dust2, mc_bsptest fires randomized traces through both the engine's trace function and the modification's, and compares the end position, the start-solid flag, the surface normal and the p" src="docs/readme/12-verification-light.png" width="100%"></picture>
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/13-footer-dark.png"><img alt="" src="docs/readme/13-footer-light.png" width="100%"></picture>
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/13-next-dark.png"><img alt="In progress. Minecraft music, played with Minecraft's track selection and silence intervals." src="docs/readme/13-next-light.png" width="100%"></picture>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/readme/14-footer-dark.png"><img alt="" src="docs/readme/14-footer-light.png" width="100%"></picture>
 
 ---
 

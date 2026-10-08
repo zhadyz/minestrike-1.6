@@ -32,7 +32,7 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
 | **1-5** | Your Counter-Strike weapons (they are slots 1-5 of the Minecraft hotbar) |
 | **6-9** / mouse wheel | Minecraft hotbar slots |
 | **Left click** | Attack (Minecraft cooldown, shown under the crosshair; crits while falling; sweeps). Hold it to mine a block. |
-| **Right click** | Use: place blocks, open and close doors, equip armor, fire rockets, eat, throw pearls and XP bottles, draw the bow, light TNT with flint and steel |
+| **Right click** | Use: place blocks, open and close doors, equip armor, fire rockets, eat, throw pearls and XP bottles, draw the bow, light TNT or start a fire with flint and steel |
 | **Jump while falling** (elytra on) | Glide. Right-click a firework rocket while gliding to boost. |
 | **G** | Drop the held Minecraft item |
 | **F5** | Minecraft camera: first person, third person behind, third person in front (`thirdperson` and `firstperson` work too) |
@@ -70,12 +70,30 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
   chat announces them: Monster Hunter, Stone Age, Diamonds!, Suit Up, Cover Me with Diamonds, Cover Me in
   Debris, Sky's the Limit, Postmortal, Take Aim, Sniper Duel and Overkill. Every death gets Minecraft's
   wording, such as "was slain by", "was shot by", "was blown up by Creeper" or "hit the ground too hard".
+- **Hit boxes true to the models.** Bullets are tested against the cubes you see, not against the hidden
+  Counter-Strike model: a head shot is a shot at the drawn head, whether that is Steve's (twice as wide as a
+  CS head), a creeper's (a foot lower) or an enderman's (a whole head above where a CS model ends), and a
+  shot between an enderman's legs is a miss. Bots aim at the drawn head or chest. `mc_hitbox_show 1`
+  outlines the boxes of the model you aim at (red head, yellow chest, orange stomach, blue arms, green legs).
+- **Armor wear.** Armor loses durability by Minecraft's formula, at most once per half second (Minecraft's
+  invulnerability window) however many bullets land in it; every bullet is still reduced by the armor.
+- **Fire.** Flint and steel lights a fire on a floor or against anything that burns: planks, logs, slabs,
+  stairs, wooden doors, wool, leaves, hay, and on the real de_dust2 the crates and wooden doors. It follows
+  Minecraft's rules: a fire ticks every 1.5 to 2 seconds, each tick gives a plank-like neighbour 20 chances
+  in 300 to burn out and nearby air a couple of chances in a hundred to catch, so it takes hold slowly and a
+  stack of crates burns for minutes. TNT is primed. Standing in fire burns half a heart every half second,
+  and you stay alight for 8 seconds after stepping out; the kill goes to whoever lit it.
+- **Torches and light.** Torches (in the Blocks tab) stand on a floor or lean from a wall, and pop off when
+  what holds them is removed. Fire, torches, glowstone and lit redstone lamps light their surroundings the
+  way Minecraft does: full strength at the source, one level less per block, stopped by walls, warm in
+  colour. On the real de_dust2 this lifts whatever is in shade (the tunnels most of all) and leaves
+  daylight as it is.
 - **Items.** Golden apple, cooked beef, totem of undying (cheats a lethal hit), ender pearl (teleport plus 5
-  damage), Bottle o' Enchanting, flint and steel, plus 52 placeable blocks and the ores' drops.
+  damage), Bottle o' Enchanting, flint and steel, plus 62 placeable blocks and the ores' drops.
 - **Minecraft HUD.** Hotbar (CS weapon icons in slots 1-5), hearts, armor bar, XP bar and level, item name
   pop-ups, the attack indicator, chat toasts and the death screen. The first-person hand is a port of
   `ItemInHandRenderer`, including equip and swing animations.
-- **Minecraft sounds.** 81 sound events and 276 variants from your own Minecraft install. CS footsteps are
+- **Minecraft sounds.** 102 sound events and 311 variants from your own Minecraft install. CS footsteps are
   replaced by the step sound of the block you stand on.
 - **Map changes.** You can switch maps (de_dust2 ↔ mc_dust2) and the Minecraft inventory comes with you.
 
@@ -90,6 +108,8 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
 | `mc_bot_armor` | 1 | Bots sometimes spawn in Minecraft armor |
 | `mc_xp_per_kill` | 12 | XP dropped by a killed player (more if they had levels) |
 | `mc_autokit` | 0 | Give the full diamond kit on first spawn |
+| `mc_fire_speed` | 1 | How fast fire burns and spreads (1: Minecraft's pace, 3: three times as fast) |
+| `mc_hitbox_show` | 0 | 1 outlines the hit boxes of the Minecraft model you aim at |
 
 Bot count and other settings are in `game/Half-Life/cstrike/csmc.cfg`. Add more creepers with `bot_add Creeper`.
 

@@ -112,7 +112,7 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
 
 <header class="hero">
   <div class="hero-text">
-    <span class="eyebrow">Minecraft × Counter-Strike bridge · Technical report · 7 October 2026</span>
+    <span class="eyebrow">Minecraft × Counter-Strike bridge · Technical report · 8 October 2026</span>
     <h1>MineStrike 1.6</h1>
     <p class="lede">MineStrike 1.6 embeds Minecraft Java Edition gameplay in Counter-Strike 1.6 without modifying the engine binary. The Counter-Strike client library is closed-source. Its interface was recovered by static analysis of the shipped PE binaries and by instrumenting live calls, and it is extended through a proxy library that forwards all 42 exports. The server library is built from ReGameDLL_CS. The map de_dust2 is parsed, rendered and collided against by the modification itself. This allows any part of the original geometry to be excavated while the engine's movement behaviour is kept. That behaviour was checked against the engine on 4,000 randomized hull traces.</p>
   </div>
@@ -127,9 +127,9 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
     <div class="fact"><b>42</b><span>client exports forwarded by the proxy, 17 of them wrapped</span></div>
     <div class="fact"><b>99.9%</b><span>of 4,000 randomized hull traces end where the engine's do</span></div>
     <div class="fact"><b>5,383</b><span>de_dust2 faces decoded and drawn by the modification</span></div>
-    <div class="fact"><b>18,180</b><span>lines of C++ (client, server, shared)</span></div>
-    <div class="fact"><b>87</b><span>Minecraft sound events, 286 variants</span></div>
-    <div class="fact"><b>19</b><span>scripted in-game test scenarios</span></div>
+    <div class="fact"><b>24,697</b><span>lines of C++ (client, server, shared)</span></div>
+    <div class="fact"><b>102</b><span>Minecraft sound events, 311 variants</span></div>
+    <div class="fact"><b>29</b><span>scripted in-game test scenarios</span></div>
   </div>
 </section>
 
@@ -205,8 +205,30 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
   </div>
 </section>
 
+<section id="combat">
+  <span class="eyebrow">5 · Combat and world rules</span>
+  <h2>Hit boxes, fire and block light</h2>
+  <p>Three places where Counter-Strike's rules disagreed with what the player sees, or with Minecraft's own rules, were resolved in favour of the latter.</p>
+  <div class="cols">
+    <div><h3>Hit boxes</h3><p>The client draws Minecraft models in place of Counter-Strike's, but the engine went on tracing bullets against the hidden Counter-Strike model. A Minecraft head is twice as wide as that model's, a creeper's head is lower, and an enderman's head lies entirely above it, so a shot at an enderman's head was a miss. For players drawn as Minecraft models, the engine's hit boxes are now switched off for the duration of each line trace, and the trace is completed against the cubes the client draws, in the same pose: head pitch, crouch, the arm pose of the held weapon, gliding, and a creeper's swelling. The cube that is hit sets the hit group, so a head shot is a shot at the drawn head. Bots aim at the drawn head or chest.</p></div>
+    <div><h3>Armor wear</h3><p>Minecraft removes max(1, damage / 4) durability from each armor piece per hit, and its half-second invulnerability window limits hits to two per second. A rifle lands ten per second, and armor that removes 90% of the damage lets its wearer survive many more of them, so armor wore out several times faster than its durability figures intend. Wear is now charged once per half-second window, sized by the largest hit in it. Every bullet is still reduced by the armor.</p></div>
+  </div>
+  <div class="cols">
+    <div><h3>Fire</h3><p>Flint and steel lights a fire on a floor or against anything flammable. Fire is a port of <code>FireBlock.tick</code> with its odds. A fire block has an age from 0 to 15 and ticks every 30 to 39 game ticks. On each tick, a plank-like neighbour burns out with probability 20 in 300 from the side and 20 in 250 from above or below, and each nearby air cell that touches something flammable ignites with a probability of a few percent. A fire with nothing flammable beside it goes out. In classic mode the crates and wooden doors of de_dust2 burn like planks, and TNT is primed. A player in fire loses one Minecraft health point every half second and stays alight for 8 s after leaving it.</p></div>
+    <div><h3>Block light</h3><p>The classic map is lit by its baked lightmaps, which cannot respond to a fire or a torch. Block light is therefore computed separately, as Minecraft computes it: a flood fill over the 40-unit cells from each source (fire 15, torch 14, glowstone and lit lamps 15) that loses one level per cell and is stopped by opaque blocks and by cells inside the map's solid space. The levels are held in a 3D texture that both renderers sample per pixel, half a cell off the surface, through the brightness curve and warm tint of <code>LightTexture</code>. The result is added to the baked light and clamped, so shaded areas are lifted and daylight is unchanged. Torches stand on floors or lean from walls, and drop when their support is removed.</p></div>
+  </div>
+  <div class="pair">
+    <figure><div class="slot"><img src="img/light_tunnel_dark.jpg" alt="A tunnel of de_dust2 in shadow"></div><figcaption><strong>Figure 10a.</strong> A tunnel of de_dust2 under the baked lightmaps alone.</figcaption></figure>
+    <figure><div class="slot"><img src="img/light_tunnel_torch.jpg" alt="The same tunnel lit by one torch standing on the floor"></div><figcaption><strong>Figure 10b.</strong> The same view with one torch on the floor. The light falls by one level per cell and is stopped by the walls.</figcaption></figure>
+  </div>
+  <div class="pair">
+    <figure><div class="slot"><img src="img/hitbox_enderman.jpg" alt="An enderman with its hit boxes outlined, between a zombie and a creeper"></div><figcaption><strong>Figure 11.</strong> The hit boxes of an enderman, outlined by <code>mc_hitbox_show</code>. The head lies above the 72-unit Counter-Strike hull.</figcaption></figure>
+    <figure><div class="slot"><img src="img/fire_crates.jpg" alt="Flames on a stack of de_dust2 crates"></div><figcaption><strong>Figure 12.</strong> A stack of de_dust2 crates about 45 s after ignition, at Minecraft's rates. The fire has taken hold of a few cells and most of the stack is intact.</figcaption></figure>
+  </div>
+</section>
+
 <section id="play">
-  <span class="eyebrow">5 · Operation</span>
+  <span class="eyebrow">6 · Operation</span>
   <h2>Launch configurations and controls</h2>
   <div class="cols">
     <div>
@@ -236,7 +258,7 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
 </section>
 
 <section id="clips">
-  <span class="eyebrow">6 · Recordings</span>
+  <span class="eyebrow">7 · Recordings</span>
   <h2>Scripted scenarios</h2>
   <p>Each recording is a scripted scenario executed in the unmodified engine and captured from the game window. The server drives the local player. No frame was edited.</p>
   <div class="grid">
@@ -260,20 +282,20 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
 </section>
 
 <section id="stills">
-  <span class="eyebrow">7 · Additional figures</span>
+  <span class="eyebrow">8 · Additional figures</span>
   <h2>Models and interface</h2>
   <div class="grid">
-    <figure><div class="slot"><img src="img/flight_2.jpg" alt="Third-person view of a player gliding on an elytra"></div><figcaption><strong>Figure 10.</strong> Elytra in third person, posed as in <code>ElytraModel</code>.</figcaption></figure>
-    <figure><div class="slot"><img src="img/gui_tooltip.jpg" alt="Creative inventory with a Diamond Sword tooltip"></div><figcaption><strong>Figure 11.</strong> Creative inventory with attribute tooltips, drawn with Minecraft's own textures.</figcaption></figure>
-    <figure><div class="slot"><img src="img/gui_kits.jpg" alt="Kits tab laid out like saved hotbars"></div><figcaption><strong>Figure 12.</strong> Equipment kits, laid out like Minecraft's saved hotbars.</figcaption></figure>
-    <figure><div class="slot"><img src="img/combat_xp.jpg" alt="Advancement toast after a kill"></div><figcaption><strong>Figure 13.</strong> An advancement notification and a death message in Minecraft's wording.</figcaption></figure>
-    <figure><div class="slot"><img src="img/model_front.jpg" alt="Third-person Minecraft player model in diamond armor"></div><figcaption><strong>Figure 14.</strong> The player model, a port of <code>HumanoidModel</code> with armor layers.</figcaption></figure>
-    <figure><div class="slot"><img src="img/ab_engine2.jpg" alt="A second de_dust2 reference view drawn by the engine"></div><figcaption><strong>Figure 15.</strong> Reference view drawn by the engine (pair of Figure 6).</figcaption></figure>
+    <figure><div class="slot"><img src="img/flight_2.jpg" alt="Third-person view of a player gliding on an elytra"></div><figcaption><strong>Figure 13.</strong> Elytra in third person, posed as in <code>ElytraModel</code>.</figcaption></figure>
+    <figure><div class="slot"><img src="img/gui_tooltip.jpg" alt="Creative inventory with a Diamond Sword tooltip"></div><figcaption><strong>Figure 14.</strong> Creative inventory with attribute tooltips, drawn with Minecraft's own textures.</figcaption></figure>
+    <figure><div class="slot"><img src="img/gui_kits.jpg" alt="Kits tab laid out like saved hotbars"></div><figcaption><strong>Figure 15.</strong> Equipment kits, laid out like Minecraft's saved hotbars.</figcaption></figure>
+    <figure><div class="slot"><img src="img/combat_xp.jpg" alt="Advancement toast after a kill"></div><figcaption><strong>Figure 16.</strong> An advancement notification and a death message in Minecraft's wording.</figcaption></figure>
+    <figure><div class="slot"><img src="img/model_front.jpg" alt="Third-person Minecraft player model in diamond armor"></div><figcaption><strong>Figure 17.</strong> The player model, a port of <code>HumanoidModel</code> with armor layers.</figcaption></figure>
+    <figure><div class="slot"><img src="img/ab_engine2.jpg" alt="A second de_dust2 reference view drawn by the engine"></div><figcaption><strong>Figure 18.</strong> Reference view drawn by the engine (pair of Figure 6).</figcaption></figure>
   </div>
 </section>
 
 <section id="how">
-  <span class="eyebrow">8 · Architecture</span>
+  <span class="eyebrow">9 · Architecture</span>
   <h2>Components and toolchain</h2>
   <div class="arch" role="img" aria-label="Architecture: the unmodified engine loads client.dll, a proxy around Valve's client with the renderers and interface, and mp.dll, built from ReGameDLL_CS with the Minecraft module. Both link the shared collision and map code. Offline tools build maps and assets.">
     <div class="box engine">GoldSrc engine · HL25 build 10210, unmodified</div>
@@ -291,7 +313,7 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
 </section>
 
 <section id="verification">
-  <span class="eyebrow">9 · Verification</span>
+  <span class="eyebrow">10 · Verification</span>
   <h2>Methodology and results</h2>
   <p>Collision was checked against the engine directly. With the engine running the real de_dust2, <code>mc_bsptest</code> fires randomized traces through both the engine's trace function and the modification's, and compares the end position, the start-solid flag, the surface normal and the point contents. Each gameplay feature has a scripted scenario. The server drives the local player and logs checkpoints, and a runner captures the game window at each one. Where noted, input is real: key presses and mouse clicks sent to the game window.</p>
   <div class="table"><table>
@@ -320,6 +342,9 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
       <tr><td><code>items</code></td><td>Ender pearl teleport (−25 HP); the totem survives 500 damage</td><td><span class="chip pass">PASS</span></td></tr>
       <tr><td><code>gui</code></td><td>Real clicks through the creative inventory, including a kit and a number-key transfer</td><td><span class="chip pass">PASS</span></td></tr>
       <tr><td><code>changelevel</code></td><td>de_dust2 → mc_dust2 → de_dust2 with the inventory preserved</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>hitbox</code></td><td>Real AK-47 shots at the drawn models: the middle of an enderman's head and the edge of Steve's head are head shots, a shot just above a creeper's head misses, a zombie's chest is a chest hit. A bot's aim at the head and at the chest of each model lands on that cube. Ten 36-damage hits in one window cost an armor piece 1 durability.</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>fire</code></td><td>Flint and steel on a crate stack of de_dust2, at Minecraft's rates: 1 flame became 7 in about 20 s, the first of 82 crate cells burned out 20 s after ignition, and 9 had gone after 40 s. At eight times the rate, a wooden door burned through and fell as one piece. A player in the fire lost health and stayed alight after leaving it.</td><td><span class="chip pass">PASS</span></td></tr>
+      <tr><td><code>light</code></td><td>A torch lights a tunnel, and the view returns to the baked lighting when it is removed. A torch whose supporting blocks are removed drops as an item. A fire lights its surroundings.</td><td><span class="chip pass">PASS</span></td></tr>
       <tr><td><code>userflow</code></td><td>Real input from the launcher through the MOTD, team selection, spawn and inventory</td><td><span class="chip pass">PASS</span></td></tr>
     </tbody>
   </table></div>
@@ -341,13 +366,15 @@ footer { padding-block: 48px 0; color: var(--muted); font-size: 0.9rem; display:
       <li>Lightmap brightness differs slightly from the engine's.</li>
       <li><kbd>Esc</kbd> closes the modification's screens but also opens the engine menu.</li>
       <li>Bots use Counter-Strike weapons only. Minecraft items are not yet drawn on Counter-Strike player models in third person.</li>
+      <li>The hit boxes of Minecraft models do not follow the walk swing of arms and legs.</li>
+      <li>Block light is computed on the 40-unit grid. A wall that does not cover a cell centre does not stop it.</li>
       <li>All verification so far was done by the author. No independent review has taken place.</li>
     </ul></div>
   </div>
 </section>
 
 <section id="next">
-  <span class="eyebrow">10 · Further work</span>
+  <span class="eyebrow">11 · Further work</span>
   <h2>In progress</h2>
   <ul>
     <li>Minecraft music, played with Minecraft's track selection and silence intervals.</li>

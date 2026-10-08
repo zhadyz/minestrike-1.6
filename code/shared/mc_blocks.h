@@ -47,6 +47,7 @@ enum : uint8_t
 	BF_EMISSIVE = 4,    // glowstone etc.
 	BF_FALLS = 8,       // sand/gravel: falls when unsupported
 	BF_EXPLOSIVE = 16,  // TNT
+	BF_FLAMMABLE = 32,  // catches fire and burns away (wood, wool, leaves)
 };
 
 // Registry, index = block type id. Entry 0 is air.
