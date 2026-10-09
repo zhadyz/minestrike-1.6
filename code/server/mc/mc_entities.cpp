@@ -455,7 +455,7 @@ CBaseEntity* SpawnThrown(CBasePlayer* pl, int kind, float speed)
 {
 	CMcThrown* t = GetClassPtr<CCSEntity>((CMcThrown*)nullptr);
 	t->m_kind = kind;
-	t->m_gravity = kind == mcp::MCE_ARROW ? 0.05f : 0.03f;
+	t->m_gravity = kind == mcp::MCE_ARROW ? ArrowGravity() : 0.03f;
 	t->Spawn();
 	UTIL_MakeVectors(pl->pev->v_angle);
 	Vector org = pl->GetGunPosition() + gpGlobals->v_forward * 8.0f - Vector(0, 0, 4);

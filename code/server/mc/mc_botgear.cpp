@@ -39,7 +39,16 @@ static const int SLOT_RANGED = mcp::FIRST_MC_SLOT, SLOT_ARROWS = mcp::FIRST_MC_S
 static const char* kArmor[] = {"iron", "chainmail", "golden", "leather"}; // best first; never above iron
 static const int BOT_ARROWS = 16;
 
-void BotGearInit() { CVAR_REGISTER(&cv_botMc); }
+// How fast an arrow falls, as a share of Minecraft's 0.05 blocks a tick each tick: half, so a bow shoots
+// flatter than Minecraft's (1 gives Minecraft's own drop). Bots allow for the same drop when they aim.
+static cvar_t cv_arrowDrop = {"mc_arrow_drop", "0.5", FCVAR_SERVER, 0.5f, nullptr};
+float ArrowGravity() { return 0.05f * (cv_arrowDrop.value < 0.0f ? 0.0f : cv_arrowDrop.value); }
+
+void BotGearInit()
+{
+	CVAR_REGISTER(&cv_botMc);
+	CVAR_REGISTER(&cv_arrowDrop);
+}
 
 static void Put(McPlayer& mp, int slot, int id, int count)
 {
@@ -290,7 +299,7 @@ void BotGearThink(CBasePlayer* bot)
 	{
 		float speed = (d.type == mci::IT_CROSSBOW ? 3.15f : 3.0f) * 40.0f * 20.0f; // units/s
 		float t = dist / speed;
-		dir.z += 0.5f * 0.05f * 40.0f * 400.0f * t * t;
+		dir.z += 0.5f * ArrowGravity() * 40.0f * 400.0f * t * t;
 	}
 	Vector ang = UTIL_VecToAngles(dir);
 	ang.x = -ang.x;

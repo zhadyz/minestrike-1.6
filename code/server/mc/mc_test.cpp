@@ -4266,6 +4266,44 @@ static void ScenarioMobSoak(CBasePlayer* pl)
 		}
 }
 
+// An arrow's drop (mc_arrow_drop): one slow level shot from over the player's head, and how far it has fallen 0.6 s later
+CBaseEntity* SpawnThrown(CBasePlayer* pl, int kind, float speed); // mc_entities.cpp
+static void ScenarioArrow(CBasePlayer* pl)
+{
+	static CBaseEntity* arrow = nullptr;
+	static float z0 = 0.0f;
+	pl->pev->takedamage = DAMAGE_NO;
+	if (Hit(1.0f))
+	{
+		// from 250 units over the player's head, slowly, towards where there is room for it
+		Vector was = pl->pev->origin, ang = pl->pev->v_angle, from = was + Vector(0, 0, 250);
+		float yaw = 0.0f;
+		for (int k = 0; k < 8; k++)
+		{
+			float a = k * 45.0f * (float)M_PI / 180.0f;
+			TraceResult tr;
+			UTIL_TraceLine(from, from + Vector(cosf(a), sinf(a), 0) * 500.0f, ignore_monsters, nullptr, &tr);
+			if (tr.flFraction >= 1.0f && !tr.fStartSolid)
+			{
+				yaw = k * 45.0f;
+				break;
+			}
+		}
+		UTIL_SetOrigin(pl->pev, from);
+		pl->pev->v_angle = Vector(0, yaw, 0);
+		arrow = SpawnThrown(pl, mcp::MCE_ARROW, 0.5f);
+		z0 = arrow ? arrow->pev->origin.z : 0.0f;
+		UTIL_SetOrigin(pl->pev, was);
+		pl->pev->v_angle = ang;
+	}
+	if (Hit(1.6f))
+	{
+		McLog("test arrow: mc_arrow_drop %.2f: 0.6 s after a level shot the arrow is %.0f units lower (Minecraft's own drop: about 148; half of it: about 74)",
+			CVAR_GET_FLOAT("mc_arrow_drop"), arrow && !FNullEnt(arrow->edict()) ? z0 - arrow->pev->origin.z : -1.0f);
+		McLog("SHOT end");
+	}
+}
+
 void TestFrame()
 {
 	const char* name = cv_testscript.string;
@@ -4377,6 +4415,8 @@ void TestFrame()
 		ScenarioTrap(pl);
 	else if (!strcmp(name, "golem"))
 		ScenarioGolem(pl);
+	else if (!strcmp(name, "arrow"))
+		ScenarioArrow(pl);
 	else if (!strcmp(name, "wither"))
 		ScenarioWither(pl);
 	else if (!strcmp(name, "mobsoak"))

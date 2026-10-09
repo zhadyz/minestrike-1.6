@@ -263,6 +263,7 @@ bool TeamMobDamage(CBasePlayer* victim, CBaseEntity* inflictor, CBaseEntity* att
 bool TeamMobSwings(CBasePlayer* pl);
 bool TeamMobBullet(CBasePlayer* victim, entvars_t* attacker, float damage, TraceResult* tr, int bits); // true: it does nothing to it
 bool BotIgnoresThreat(CBasePlayer* bot, CBasePlayer* other); // an iron golem, to a bot without a sword
+float ArrowGravity();                                        // mc_botgear.cpp: an arrow's drop, blocks a tick each tick (mc_arrow_drop)
 bool BotHasSword(CBasePlayer* bot);                          // mc_botgear.cpp
 bool WasBulletOf(entvars_t* shooter);                        // mc_world_srv.cpp: the hit being dealt now is that player's bullet
 void TeamMobFrame();

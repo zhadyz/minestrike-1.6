@@ -278,6 +278,7 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
 | `mc_bot_pocket` | 0 | Blocks every bot is given free, to get over craters (0: only those who bought some can) |
 | `mc_bot_tnt` | 8 | Percent of bots that buy TNT when they can afford it on top of a rifle |
 | `mc_bot_learn` | 1 | Bots learn your way in, what you do at a wall and which chances are worth taking (0: even chances) |
+| `mc_arrow_drop` | 0.5 | How fast arrows fall, as a share of Minecraft's own drop (1: Minecraft's; bots aim for the same drop) |
 | `mc_golem_max` | 1 | Living iron golems a side may have at once |
 | `mc_golem_reflect` | 10 | Percent of the bullets that hit an iron golem that come back at whoever fired them |
 | `mc_golem_reflect_damage` | 35 | Percent of its damage such a bullet still has |
@@ -327,7 +328,7 @@ GoldSrc engine (HL25, build 10210, unmodified)
   drives the player and logs `SHOT name` lines, and the runner captures the game window at each one. It also
   sends real keys and mouse clicks when the scenario logs `KEYS ...`. Scenarios: `combat elytra mine tnt tour
   model items creeper creeperwatch enderman changelevel gui lab bomb hitbox fire light economy enchant shop
-  tactics learn blasts materials walls trap golem wither mobsoak`. Scenarios run without the freeze and on a 9-minute round (the
+  tactics learn blasts materials walls trap golem wither mobsoak arrow`. Scenarios run without the freeze and on a 9-minute round (the
   launchers set that); pass `mp_freezetime` and the rest in `TESTCMDS` to test on the play clocks.
 - `tools/runtest_headless.sh <map> <scenario>` runs a scenario on the dedicated server (`hlds.exe`) instead:
   no window, nothing on the screen, and it runs beside a game somebody is playing. A bot stands in for the
