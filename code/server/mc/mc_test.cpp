@@ -3989,15 +3989,23 @@ static void ScenarioGolem(CBasePlayer* pl)
 	}
 	if (Hit(12.2f))
 	{
+		// two bursts of thirty rifle bullets at its trunk (thirty a frame: what comes back is dealt the frame after)
 		hp0 = golem->pev->health;
-		Vector src = foe->pev->origin, aim = (golem->pev->origin - src).Normalize();
-		UTIL_MakeVectors(foe->pev->v_angle);
-		foe->FireBullets3(src, aim, 0.0f, 8192.0f, 2, BULLET_PLAYER_762MM, 36, 0.98f, foe->pev, false, foe->random_seed);
+		foe->pev->health = 2000.0f;
 	}
+	if (Hit(12.2f) || Hit(12.3f))
+		for (int k = 0; k < 30; k++)
+		{
+			Vector src = foe->pev->origin, aim = (golem->pev->origin - src).Normalize();
+			UTIL_MakeVectors(foe->pev->v_angle);
+			foe->FireBullets3(src, aim, 0.0f, 8192.0f, 2, BULLET_PLAYER_762MM, 36, 0.98f, foe->pev, false, foe->random_seed);
+		}
 	if (Hit(12.5f))
 	{
-		McLog("test golem: a rifle bullet at its trunk costs it %.0f health and the one who fired it %.0f (want 0, and about 35: it came back)", hp0 - golem->pev->health,
-			100.0f - (foe->IsAlive() ? foe->pev->health : 0.0f));
+		McLog("test golem: sixty rifle bullets at its trunk cost it %.0f health (want 0) and the one who fired them %.0f (want about 6 of them back at a third "
+			  "of their 35: about 70, give or take half); its top speed is now %.0f (want well under its 190)",
+			hp0 - golem->pev->health, 2000.0f - foe->pev->health, golem->pev->maxspeed);
+		foe->pev->health = 100.0f;
 		foe->pev->takedamage = DAMAGE_NO;
 		hp0 = golem->pev->health;
 		float o[3] = {golem->pev->origin.x + 30.0f, golem->pev->origin.y, golem->pev->origin.z};

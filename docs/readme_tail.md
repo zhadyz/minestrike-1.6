@@ -4,7 +4,7 @@
 
 - **Blocks are an economy.** A block costs by what it stops: wool, glass and sand ($50) stop no bullet, planks ($100) stop pistols but not rifles, stone ($200) stops every gun, obsidian ($800) stops TNT too. Rounds are short, so a wall buys seconds that matter.
 - **Bots that build and breach.** They wall a way in and wait behind it or leave it as a bluff, dig through with cover, blow thin site walls open, lay mines, bridge craters. Nothing is on a cue: each use is a bot weighing its moment, and they learn the way in you take and what you do at a wall.
-- **The iron golem.** Four iron blocks in a T and a carved pumpkin: it fights for your side and plays the objective. Bullets bounce off it back at whoever fired them; only a sword hurts it.
+- **The iron golem.** Four iron blocks in a T and a carved pumpkin: it fights for your side and plays the objective. Bullets only slow it, and one in ten comes back at whoever fired it; only a sword hurts it.
 - **The wither.** Four soul sand and three wither skeleton skulls, all the money a player can hold. It rises for eleven seconds, goes off with a blast the whole map hears, and hunts the other side with exploding skulls.
 - **The round's story.** When a round ends everybody gets one line on how it was won and what was done with blocks, TNT and mobs.
 

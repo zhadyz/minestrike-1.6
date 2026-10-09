@@ -10,10 +10,13 @@
 // Whoever of the other side it meets there it fights. Its numbers are Minecraft's: 100 health (500 here),
 // 7.5 to 21.5 a blow (38 to 108 here), a blow a second, and a blow throws its victim into the air. It is
 // slower than a running player (190 against 250).
-// Its quirk: nothing hurts it but a sword. Bullets do nothing to it and come back at whoever fired them,
-// with all they had; arrows, knives, TNT, fire and falls do nothing. (Another mob's blow does: two golems
-// settle it between them.) So a side that meets one needs swords, or goes round it: it does not plant or
-// defuse. Bots know: one without a sword does not shoot at it and keeps away, one with a sword goes in. It does not count as a living member of its side when the round is decided, does not
+// Its quirk: nothing hurts it but a sword. Bullets do not hurt it, but they slow it: each one a little
+// more, down to a third of its pace under steady fire, and it picks up again when the fire stops. Each
+// rings on it like a bullet on a helmet. One bullet in ten (mc_golem_reflect) comes back at whoever fired
+// it, with a third of its damage (mc_golem_reflect_damage) and the whine of a ricochet. Arrows, knives, TNT, fire and falls do nothing. (Another mob's blow does: two
+// golems settle it between them.) So a side that meets one holds it off with fire and kills it with swords,
+// or goes round it: it does not plant or defuse. Bots know: one without a sword keeps away and fires at it
+// only when it is close, to slow it; one with a sword goes in. It does not count as a living member of its side when the round is decided, does not
 // take the bomb or defuse, and is gone when the round is over.
 #include "precompiled.h"
 
@@ -27,6 +30,8 @@
 namespace mc
 {
 static cvar_t cv_golemMax = {"mc_golem_max", "1", FCVAR_SERVER, 1.0f, nullptr}; // living golems a side may have at once
+static cvar_t cv_golemReflect = {"mc_golem_reflect", "10", FCVAR_SERVER, 10.0f, nullptr};              // % of bullets that come back off a golem
+static cvar_t cv_golemReflectDamage = {"mc_golem_reflect_damage", "35", FCVAR_SERVER, 35.0f, nullptr}; // % of its damage such a bullet still has
 // The wither. Four soul sand in a T and three wither skeleton skulls along its top; the last skull set brings
 // it, for the side of whoever set it. It rises for eleven seconds where it was built, and nothing touches
 // it then; everybody is told where. Then it goes off with a blast of power 7 (the bomb's own is about that),
@@ -54,6 +59,7 @@ struct TeamMob
 	int kind = TM_NONE;
 	int builder = 0; // the player who built it
 	float nextHit = 0, nextGoal = 0, swingUntil = 0;
+	float stagger = 0, staggerAt = 0; // a golem under fire: how much it is slowed (0..1), and as of when
 	// the wither
 	float chargeUntil = 0, nextSkull = 0, nextRegen = 0, breakAt = 0, nextAmbient = 0;
 	bool risen = false;
@@ -82,6 +88,7 @@ void WitherEffect(CBasePlayer* victim, CBasePlayer* by)
 	g_withered[i].by = by ? by->entindex() : 0;
 }
 static TeamMob g_tm[MAX_CLIENTS + 1];
+static float Stagger(const TeamMob& m);
 
 // bullets on their way back (dealt at the start of the next frame: not from inside the shot that made them)
 struct Bounce
@@ -245,10 +252,17 @@ bool TeamMobPreThink(CBasePlayer* pl)
 {
 	if (!IsMobBot(pl))
 		return false;
-	float top = TeamMobOf(pl) == TM_WITHER ? kWitherSpeed : kGolemSpeed;
+	float top = TeamMobOf(pl) == TM_WITHER ? kWitherSpeed : kGolemSpeed * (1.0f - 0.67f * Stagger(g_tm[pl->entindex()]));
 	if (pl->IsAlive() && pl->pev->maxspeed > top)
 		pl->pev->maxspeed = top;
 	return true;
+}
+
+// How much a golem is slowed by the bullets it has taken: it wears off in under two seconds
+static float Stagger(const TeamMob& m)
+{
+	float v = m.stagger - (gpGlobals->time - m.staggerAt) * 0.6f;
+	return v > 0.0f ? v : 0.0f;
 }
 
 static bool HoldsSword(CBasePlayer* pl)
@@ -270,15 +284,46 @@ bool TeamMobBullet(CBasePlayer* victim, entvars_t* attacker, float damage, Trace
 		return false;
 	if ((bits & DMG_SLASH) && HoldsSword(shooter))
 		return false; // the one thing that hurts it
-	if (WasBulletOf(attacker) && shooter->IsAlive() && shooter->m_iTeam != victim->m_iTeam)
+	if (WasBulletOf(attacker) && shooter->m_iTeam != victim->m_iTeam)
 	{
-		// the bullet comes back with all it had
+		// it does not hurt, but it slows: every bullet a little more
+		TeamMob& m = g_tm[victim->entindex()];
+		float s = Stagger(m) + 0.12f;
+		m.stagger = s > 1.0f ? 1.0f : s;
+		m.staggerAt = gpGlobals->time;
+		// It rings like a helmet that has been hit, with the helmet's yellow spray: Counter-Strike's own sound
+		// and splash for a bullet on armor
+		EMIT_SOUND_DYN(victim->edict(), CHAN_BODY, "player/bhit_helmet-1.wav", VOL_NORM, ATTN_NORM, 0, RANDOM_LONG(92, 108));
 		if (tr)
-			UTIL_Sparks(tr->vecEndPos);
-		EMIT_SOUND_DYN(victim->edict(), CHAN_BODY, RANDOM_LONG(0, 1) ? "weapons/ric_metal-1.wav" : "weapons/ric_metal-2.wav", 1.0f, ATTN_NORM, 0,
-			RANDOM_LONG(95, 110));
-		if (g_bounces.size() < 64)
-			g_bounces.push_back({shooter->entindex(), victim->entindex(), damage});
+		{
+			Vector n = tr->vecPlaneNormal;
+			if (n.Length() < 0.5f)
+				n = (shooter->pev->origin - victim->pev->origin).Normalize();
+			MESSAGE_BEGIN(MSG_PVS, SVC_TEMPENTITY, tr->vecEndPos);
+			WRITE_BYTE(TE_STREAK_SPLASH);
+			WRITE_COORD(tr->vecEndPos.x);
+			WRITE_COORD(tr->vecEndPos.y);
+			WRITE_COORD(tr->vecEndPos.z);
+			WRITE_COORD(n.x);
+			WRITE_COORD(n.y);
+			WRITE_COORD(n.z);
+			WRITE_BYTE(5);   // yellow
+			WRITE_SHORT(22); // count
+			WRITE_SHORT(25); // base speed
+			WRITE_SHORT(65); // random velocity
+			MESSAGE_END();
+		}
+		// and now and then one comes back at whoever fired it, with part of what it had: the whine of a ricochet
+		if (shooter->IsAlive() && RANDOM_FLOAT(0.0f, 100.0f) < cv_golemReflect.value)
+		{
+			EMIT_SOUND_DYN(victim->edict(), CHAN_ITEM, RANDOM_LONG(0, 1) ? "weapons/ric_metal-1.wav" : "weapons/ric_metal-2.wav", VOL_NORM, ATTN_NORM, 0,
+				RANDOM_LONG(95, 110));
+			// (the one it comes back at hears it too, wherever he stands)
+			if (!shooter->IsBot())
+				EMIT_SOUND_DYN(shooter->edict(), CHAN_ITEM, "weapons/ric_metal-1.wav", 0.7f, ATTN_NORM, 0, RANDOM_LONG(105, 120));
+			if (g_bounces.size() < 64)
+				g_bounces.push_back({shooter->entindex(), victim->entindex(), damage * cv_golemReflectDamage.value * 0.01f});
+		}
 	}
 	return true;
 }
@@ -613,16 +658,20 @@ static void BotsAndGolems(float now)
 				{
 					CBasePlayer* hp = UTIL_PlayerByIndex(h);
 					if (hp && !hp->IsBot() && hp->m_iTeam == b->m_iTeam)
-						Toast(hp, 0, "<%s> %s", STRING(b->pev->netname), RANDOM_LONG(0, 1) ? "Golem! Bullets bounce off it. Keep away." : "Iron golem here. Swords only.");
+						Toast(hp, 0, "<%s> %s", STRING(b->pev->netname), RANDOM_LONG(0, 1) ? "Golem! Bullets only slow it. Keep away." : "Iron golem here. Hold it off, swords kill it.");
 				}
 			}
 		}
 	}
 }
 
+// A golem is no target for a bot without a sword: its bullets do not hurt it. Except when it is close: then
+// they are worth firing, they slow it.
 bool BotIgnoresThreat(CBasePlayer* bot, CBasePlayer* other)
 {
-	return bot && other && TeamMobOf(other) == TM_GOLEM && other->m_iTeam != bot->m_iTeam && !BotHasSword(bot);
+	if (!bot || !other || TeamMobOf(other) != TM_GOLEM || other->m_iTeam == bot->m_iTeam || BotHasSword(bot))
+		return false;
+	return (other->pev->origin - bot->pev->origin).Length() > 450.0f;
 }
 
 void TeamMobFrame()
@@ -642,10 +691,10 @@ void TeamMobFrame()
 			if (!shooter->IsBot() && (now - g_toldBounce[b.shooter] > 8.0f || g_toldBounce[b.shooter] > now))
 			{
 				g_toldBounce[b.shooter] = now;
-				Toast(shooter, 1, "Bullets bounce off an iron golem. Only a sword hurts it.");
+				Toast(shooter, 1, "Bullets only slow an iron golem, and some come back. Only a sword hurts it.");
 			}
 			if (!shooter->IsAlive())
-				StoryTell(4.0f, "%s shot at the iron golem and died of the bullet that came back", STRING(shooter->pev->netname));
+				StoryTell(4.0f, "%s shot at the iron golem and died of a bullet that came back", STRING(shooter->pev->netname));
 		}
 	}
 	{
@@ -774,6 +823,8 @@ static bool H_MobRoundEnd(IReGameHook_RoundEnd* chain, int winStatus, ScenarioEv
 void TeamMobsInit()
 {
 	CVAR_REGISTER(&cv_golemMax);
+	CVAR_REGISTER(&cv_golemReflect);
+	CVAR_REGISTER(&cv_golemReflectDamage);
 	CVAR_REGISTER(&cv_witherRounds);
 	g_ReGameHookchains.m_CSGameRules_FPlayerCanRespawn.registerHook(&H_CanRespawn, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_MakeBomber.registerHook(&H_MakeBomber, HC_PRIORITY_DEFAULT);

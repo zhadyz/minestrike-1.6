@@ -141,10 +141,13 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
   - *Iron golem*, $3,500: four iron blocks ($300 each) in a T (one on the ground, one on it, one to either
     side of that) and a carved pumpkin ($2,300) set on top last. Minecraft's numbers: 100 health (500
     here), 7.5 to 21.5 a blow (38 to 108), a blow a second, and a blow throws you into the air. It walks
-    at 190 units a second where you run at 250. **Nothing hurts it but a sword.** A bullet does nothing to
-    it and comes back at whoever fired it, with all it had; arrows, knives, TNT, fire and falls do nothing.
-    (Another mob's blow does.) So you bring swords, or you go round it. One a side at a time
-    (`mc_golem_max`).
+    at 190 units a second where you run at 250. **Nothing hurts it but a sword.** Bullets do not hurt it,
+    but they slow it: each one a little more, down to a third of its pace under steady fire, and it picks
+    up again within two seconds when the fire stops. Every bullet rings on it like one on a helmet, with
+    the helmet's yellow spray. One bullet in ten comes back at whoever fired it, with a third of its damage
+    and the whine of a ricochet (`mc_golem_reflect`, `mc_golem_reflect_damage`). Arrows, knives, TNT, fire
+    and falls do nothing. (Another mob's blow does.) So you hold it off with fire and kill it with swords,
+    or you go round it. One a side at a time (`mc_golem_max`).
   - *Wither*, $16,000, all the money a player can hold: four soul sand ($250 each) in the same T and three
     wither skeleton skulls ($5,000 each) along its top, the last skull set last. Everybody is told at once.
     It rises for eleven seconds where it was built and nothing touches it then; then it goes off with a
@@ -157,8 +160,9 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
     It hangs in the air over holes. A side may raise one every eight rounds (`mc_wither_rounds`).
   - *Bots.* A bot with a rifle's money besides sometimes buys a golem's parts and builds it at the first
     quiet moment of the round (`mc_bot_golem`); one at the money ceiling with its rifle in hand may spend
-    all of it on a wither (`mc_bot_wither`). A bot does not shoot at a golem: one with a sword goes in,
-    one without keeps away and says why, and a side that has met a golem buys swords the next round.
+    all of it on a wither (`mc_bot_wither`). Against a golem a bot with a sword goes in with it; one
+    without keeps away, says why, and fires at it only when it is within 450 units, to slow it; and a side
+    that has met a golem buys swords the next round.
 - **Minecraft weapons next to guns.** Minecraft armor reduces bullets only: swords, axes, arrows,
   explosions and fire go through it. Minecraft weapon damage is Minecraft's own table times
   `mc_weapon_scale` (1.5). With a Minecraft weapon in hand your aim is not kicked when you are hit; with a
@@ -275,6 +279,8 @@ You get the MOTD with the controls, then the team menu. Pick a side, then press 
 | `mc_bot_tnt` | 8 | Percent of bots that buy TNT when they can afford it on top of a rifle |
 | `mc_bot_learn` | 1 | Bots learn your way in, what you do at a wall and which chances are worth taking (0: even chances) |
 | `mc_golem_max` | 1 | Living iron golems a side may have at once |
+| `mc_golem_reflect` | 10 | Percent of the bullets that hit an iron golem that come back at whoever fired them |
+| `mc_golem_reflect_damage` | 35 | Percent of its damage such a bullet still has |
 | `mc_wither_rounds` | 8 | Rounds a side waits between two withers |
 | `mc_bot_golem` | 40 | Percent of bots with the money for it that buy an iron golem's parts when their side has none |
 | `mc_bot_wither` | 50 | Percent of bots at the money ceiling, rifle in hand, that buy a wither's parts when their side may raise one |
@@ -359,7 +365,7 @@ tools/launch.ps1 -Map mc_dust2 -Bots 6
   there (bots do not dig the map); `mc_bot_pocket 4` gives every bot blocks to climb out with.
 - The world resets every round by default. Set `mc_world_reset 0` to keep changes until the map changes.
 - Minecraft assets come from your own Minecraft account (`assets/`, git-ignored) and are not redistributable.
-- An iron golem is hard on bots: they cannot shoot it, and those without a sword only keep away from it. In
+- An iron golem is hard on bots: their bullets only slow it, and those without a sword only keep away. In
   bots-only test matches a single golem has killed most of the other side. A side that met one buys swords
   the next round; whether that is enough has not been measured.
 - A golem and a wither have a player's body for the map (they pass where a player passes) though they are
