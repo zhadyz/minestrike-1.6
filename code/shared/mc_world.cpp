@@ -10,6 +10,7 @@
 
 namespace mcw
 {
+const uint8_t* g_tracePass = nullptr;
 
 // ---------------------------------------------------------------------------------------------
 // Shapes
@@ -76,6 +77,10 @@ int ShapeBoxes(ShapeKind shape, uint16_t state, LocalBox out[4])
 		out[0] = MakeBox(7.0f / 16.0f, 7.0f / 16.0f, 0, 9.0f / 16.0f, 9.0f / 16.0f, 1);
 		return 1;
 
+	case SHAPE_TABLE:
+		out[0] = MakeBox(0, 0, 0, 1, 1, 0.75f);
+		return 1;
+
 	case SHAPE_NONE:
 	case SHAPE_CROSS:
 	default:
@@ -112,6 +117,10 @@ int PickBoxes(ShapeKind shape, uint16_t state, LocalBox out[4])
 	{
 	case SHAPE_CROSS:
 		out[0] = MakeBox(0.2f, 0.2f, 0.0f, 0.8f, 0.8f, 0.8f);
+		return 1;
+	case SHAPE_TABLE:
+		// the whole cell: on a classic map the table is drawn on the floor, which can be anywhere in it
+		out[0] = MakeBox(0, 0, 0, 1, 1, 1);
 		return 1;
 	case SHAPE_DUST:
 		out[0] = MakeBox(0, 0, 0, 1, 1, 1 * s);
@@ -200,6 +209,8 @@ int LoadBoxes(const World& w, int bx, int by, int bz, Cell c, bool includeCross,
 {
 	const uint16_t type = CellType(c);
 	if (type == 0)
+		return 0;
+	if (g_tracePass && type < 1024 && g_tracePass[type])
 		return 0;
 	const double base[3] = {(double)w.origin[0] + (double)bx * kBlock, (double)w.origin[1] + (double)by * kBlock,
 		(double)w.origin[2] + (double)bz * kBlock};

@@ -72,6 +72,7 @@ int ItemIdAt(int index); // index 0..ItemTotal()-1 -> id (skips the "air" entry)
 int ItemTotal();
 
 int FindItem(const char* name);           // -1 if unknown; accepts optional "minecraft:" prefix
+int Price(int id);                        // Counter-Strike dollars for one of the item; 0 = not for sale
 inline const ItemDef& Item(int id)
 {
 	if (id >= DYN_ITEM_BASE && id < DYN_ITEM_BASE + g_numDynItems)
@@ -91,6 +92,7 @@ struct Stack
 	uint16_t id = 0;
 	uint8_t count = 0;
 	uint16_t damage = 0;
+	uint16_t ench = 0; // enchantments, packed (mc_enchant.h)
 	bool Empty() const { return id == 0 || count == 0; }
 };
 

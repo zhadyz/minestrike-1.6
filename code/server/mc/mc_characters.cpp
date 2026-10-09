@@ -55,6 +55,15 @@ void CharacterSpawn(CBasePlayer* pl)
 {
 	int i = pl->entindex();
 	static bool assigned[MAX_CLIENTS + 1];
+	if (IsMobBot(pl))
+	{
+		// a team mob has a character of its own, whatever look the slot's last bot had
+		assigned[i] = false;
+		g_char[i] = TeamMobOf(pl) == TM_WITHER ? mcp::CHAR_FIRST_MOB + 1 : mcp::CHAR_FIRST_MOB;
+		Broadcast(i);
+		ApplyModel(pl);
+		return;
+	}
 	if (pl->IsBot() && !assigned[i])
 	{
 		// bots: a mix of looks; the mob bots keep their mob
@@ -99,7 +108,7 @@ void OpenCharacterMenu(CBasePlayer* pl, int menu)
 	else
 	{
 		int first = menu == 31 ? mcp::CHAR_FIRST_MC : menu == 32 ? mcp::CHAR_FIRST_SKIN : mcp::CHAR_FIRST_CS;
-		int last = menu == 31 ? mcp::CHAR_FIRST_SKIN : menu == 32 ? mcp::CHAR_FIRST_CS : mcp::kNumCharacters;
+		int last = menu == 31 ? mcp::CHAR_FIRST_SKIN : menu == 32 ? mcp::CHAR_FIRST_CS : mcp::CHAR_FIRST_MOB;
 		Q_snprintf(buf, sizeof(buf), "\\y%s\\w\n\n", menu == 31 ? "Minecraft characters" : menu == 32 ? "Minecraft player skins" : "Counter-Strike models");
 		for (int c = first, k = 0; c < last && k < 8; c++, k++)
 		{
@@ -132,7 +141,7 @@ bool CharacterMenuSelect(CBasePlayer* pl, int menu, int key)
 			return true;
 		}
 		int first = menu == 31 ? mcp::CHAR_FIRST_MC : menu == 32 ? mcp::CHAR_FIRST_SKIN : mcp::CHAR_FIRST_CS;
-		int last = menu == 31 ? mcp::CHAR_FIRST_SKIN : menu == 32 ? mcp::CHAR_FIRST_CS : mcp::kNumCharacters;
+		int last = menu == 31 ? mcp::CHAR_FIRST_SKIN : menu == 32 ? mcp::CHAR_FIRST_CS : mcp::CHAR_FIRST_MOB;
 		int c = first + key - 1;
 		if (key >= 1 && c < last)
 			SetCharacter(pl, c);
@@ -149,7 +158,7 @@ bool CharacterCommand(CBasePlayer* pl, const char* arg)
 		OpenCharacterMenu(pl, 30);
 		return true;
 	}
-	for (int c = 0; c < mcp::kNumCharacters; c++)
+	for (int c = 0; c < mcp::CHAR_FIRST_MOB; c++)
 		if (!Q_stricmp(arg, mcp::kCharacters[c].name))
 		{
 			SetCharacter(pl, c);

@@ -6,7 +6,10 @@
 #include "mc_state.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <vector>
 
 namespace mc
 {
@@ -55,6 +58,47 @@ const mci::ItemDef* HeldItem()
 	return id ? &mci::Item(id) : nullptr;
 }
 
+// mc_shot <file.bmp>: the frame being drawn (the world, the HUD and the mod's screens), written by the game
+// itself. Test runs on a hidden desktop use it: there nothing outside the game can capture its window.
+static char g_shotPath[260] = "";
+static void Cmd_Shot()
+{
+	if (gEngfuncs.Cmd_Argc() >= 2)
+	{
+		strncpy(g_shotPath, gEngfuncs.Cmd_Argv(1), sizeof(g_shotPath) - 1);
+		g_shotPath[sizeof(g_shotPath) - 1] = 0;
+	}
+}
+static void ShotFrame()
+{
+	if (!g_shotPath[0])
+		return;
+	GLint vp[4] = {0, 0, 0, 0};
+	glGetIntegerv(GL_VIEWPORT, vp);
+	int w = vp[2], h = vp[3], row = (w * 3 + 3) & ~3;
+	FILE* f = (w > 0 && h > 0) ? fopen(g_shotPath, "wb") : nullptr;
+	if (f)
+	{
+		std::vector<unsigned char> px((size_t)row * h);
+		glPixelStorei(GL_PACK_ALIGNMENT, 4);
+		glReadBuffer(GL_BACK);
+		glReadPixels(vp[0], vp[1], w, h, 0x80E0 /* GL_BGR */, GL_UNSIGNED_BYTE, px.data());
+		unsigned char hd[54] = {'B', 'M'};
+		unsigned int size = 54 + (unsigned int)px.size(), off = 54, ihs = 40, planes = 1 | (24 << 16);
+		memcpy(hd + 2, &size, 4);
+		memcpy(hd + 10, &off, 4);
+		memcpy(hd + 14, &ihs, 4);
+		memcpy(hd + 18, &w, 4);
+		memcpy(hd + 22, &h, 4);
+		memcpy(hd + 26, &planes, 4);
+		fwrite(hd, 1, 54, f);
+		fwrite(px.data(), 1, px.size(), f);
+		fclose(f);
+		Log("mc_shot: %dx%d to %s", w, h, g_shotPath);
+	}
+	g_shotPath[0] = 0;
+}
+
 void OnInitialize()
 {
 	Log("OnInitialize: game dir '%s'", gEngfuncs.pfnGetGameDirectory ? gEngfuncs.pfnGetGameDirectory() : "?");
@@ -72,6 +116,7 @@ void OnHudInit()
 	WorldInit();
 	extern void MusicInit();
 	MusicInit();
+	gEngfuncs.pfnAddCommand((char*)"mc_shot", Cmd_Shot);
 	// Minecraft hotbar replaces CS's weapon selection popup
 	gEngfuncs.Cvar_SetValue((char*)"hud_fastswitch", 1.0f);
 }
@@ -133,6 +178,7 @@ void OnRedraw(float time, int intermission)
 	}
 	else
 		GuiHide();
+	ShotFrame();
 }
 
 void DrawCsModelItems(); // mc_anim_cl.cpp

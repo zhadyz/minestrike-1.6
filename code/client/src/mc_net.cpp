@@ -95,6 +95,36 @@ static int MsgInv(const char*, int size, void* buf)
 	return 1;
 }
 
+void GuiEnchant(bool open); // mc_gui.cpp
+static int MsgEnchUi(const char*, int size, void* buf)
+{
+	Reader r(buf, size);
+	bool open = r.Byte() != 0;
+	g_cl.enchSlot = r.Byte();
+	for (int i = 0; i < 3; i++)
+	{
+		g_cl.enchLevel[i] = r.Byte();
+		g_cl.enchClueKind[i] = r.Byte();
+		g_cl.enchClueLevel[i] = r.Byte();
+	}
+	g_cl.enchSeed = (unsigned)r.Long();
+	GuiEnchant(open);
+	return 1;
+}
+
+static int MsgEnch(const char*, int size, void* buf)
+{
+	Reader r(buf, size);
+	memset(g_cl.ench, 0, sizeof(g_cl.ench));
+	for (int n = r.Byte(); n > 0; n--)
+	{
+		int slot = r.Byte(), e = r.Short();
+		if (slot >= 0 && slot < 48)
+			g_cl.ench[slot] = e & 0xFFFF;
+	}
+	return 1;
+}
+
 static int MsgInvMain(const char*, int size, void* buf)
 {
 	Reader r(buf, size);
@@ -131,6 +161,8 @@ static int MsgStat(const char*, int size, void* buf)
 	g_cl.absorption = r.Byte();
 	if (r.bad)
 		g_cl.food = 20;
+	else
+		g_cl.money = r.Long();
 	return 1;
 }
 
@@ -286,6 +318,8 @@ void NetInit()
 	gEngfuncs.pfnHookUserMsg((char*)MCMSG_HELLO, MsgHello);
 	gEngfuncs.pfnHookUserMsg((char*)MCMSG_TOAST, MsgToast);
 	gEngfuncs.pfnHookUserMsg((char*)MCMSG_INVMAIN, MsgInvMain);
+	gEngfuncs.pfnHookUserMsg((char*)MCMSG_ENCH, MsgEnch);
+	gEngfuncs.pfnHookUserMsg((char*)MCMSG_ENCHUI, MsgEnchUi);
 	gEngfuncs.pfnHookUserMsg((char*)MCMSG_CHAR, MsgChar);
 }
 

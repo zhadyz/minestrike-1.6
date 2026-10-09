@@ -25,7 +25,9 @@ enum Rig
 	RIG_HUMANOID,
 	RIG_ZOMBIE, // the humanoid with its arms out when empty-handed
 	RIG_CREEPER,
-	RIG_ENDERMAN
+	RIG_ENDERMAN,
+	RIG_GOLEM,
+	RIG_WITHER
 };
 
 // Team-default players are Minecraft models unless the client's mc_players says otherwise (PlayersEnabled
@@ -46,6 +48,10 @@ static Rig RigOf(CBasePlayer* pl)
 	if (mcp::IsMinecraftCharacter(c))
 	{
 		const char* skin = mcp::kCharacters[c].skin;
+		if (strstr(skin, "iron_golem"))
+			return RIG_GOLEM;
+		if (strstr(skin, "entity/wither/"))
+			return RIG_WITHER;
 		if (strstr(skin, "creeper"))
 			return RIG_CREEPER;
 		if (strstr(skin, "enderman"))
@@ -55,6 +61,8 @@ static Rig RigOf(CBasePlayer* pl)
 	if (c > 0 || !DefaultsAreMinecraft())
 		return RIG_NONE;
 	const char* n = STRING(pl->pev->netname);
+	if (TeamMobOf(pl) == TM_GOLEM)
+		return RIG_GOLEM;
 	if (strstr(n, "Creeper"))
 		return RIG_CREEPER;
 	if (strstr(n, "Enderman"))
@@ -198,6 +206,32 @@ static int BuildRig(CBasePlayer* pl, Rig rig, RigBox* out)
 
 	float headXr = pitch * PI / 180.0f;
 	int n = 0;
+	if (rig == RIG_WITHER)
+	{
+		// WitherBossModel at twice its size (mc_players.cpp): the middle head, the shoulders, the spine and
+		// tail, a smaller head to either side
+		Part wc = {0, -24, 0, 0, 0, 0}, wr = {-16, -16, 0, 0, 0, 0}, wl = {20, -16, 0, 0, 0, 0};
+		AddBox(out, n, base, wc, -8, -8, -8, 16, 16, 16, HITGROUP_HEAD);
+		AddBox(out, n, base, wc, -20, 7.8f, -1, 40, 6, 6, HITGROUP_CHEST);
+		AddBox(out, n, base, wc, -4, 13.8f, -1, 6, 28, 12, HITGROUP_STOMACH);
+		AddBox(out, n, base, wr, -8, -8, -8, 12, 12, 12, HITGROUP_RIGHTARM);
+		AddBox(out, n, base, wl, -8, -8, -8, 12, 12, 12, HITGROUP_LEFTARM);
+		return n;
+	}
+	if (rig == RIG_GOLEM)
+	{
+		// IronGolemModel (mc_players.cpp draws the same boxes): the head, the trunk, the waist, arms to the knees
+		Part gh = {0, -7, -2, headXr, 0, 0}, gb = {0, -7, 0, 0, 0, 0};
+		AddBox(out, n, base, gh, -4, -12, -5.5f, 8, 10, 8, HITGROUP_HEAD);
+		AddBox(out, n, base, gb, -9, -2, -6, 18, 12, 11, HITGROUP_CHEST);
+		AddBox(out, n, base, gb, -4.5f, 10, -3, 9, 5, 6, HITGROUP_STOMACH);
+		AddBox(out, n, base, gb, -13, -2.5f, -3, 4, 30, 6, HITGROUP_RIGHTARM);
+		AddBox(out, n, base, gb, 9, -2.5f, -3, 4, 30, 6, HITGROUP_LEFTARM);
+		const Part gl[2] = {{-4, 11, 0, 0, 0, 0}, {5, 11, 0, 0, 0, 0}};
+		AddBox(out, n, base, gl[0], -3.5f, -3, -3, 6, 16, 5, HITGROUP_RIGHTLEG);
+		AddBox(out, n, base, gl[1], -3.5f, -3, -3, 6, 16, 5, HITGROUP_LEFTLEG);
+		return n;
+	}
 	if (rig == RIG_CREEPER)
 	{
 		Part ch = {0, 6, 0, headXr, 0, 0}, cb = {0, 6, 0, 0, 0, 0};
@@ -430,11 +464,11 @@ void HitRigsTrace(const float* v1, const float* v2, TraceResult* ptr)
 	for (int h = 0; h < g_numHidden; h++)
 	{
 		CBasePlayer* p = g_hidden[h].pl;
-		// far from the line: no need to pose the model (the tallest, an enderman aiming, fits in 96 units)
+		// far from the line: no need to pose the model (the tallest, a wither, fits in 160 units)
 		float c[3] = {p->pev->origin.x - v1[0], p->pev->origin.y - v1[1], p->pev->origin.z + 14.0f - v1[2]};
 		float t = len2 > 0.0f ? clamp((c[0] * d[0] + c[1] * d[1] + c[2] * d[2]) / len2, 0.0f, 1.0f) : 0.0f;
 		float q[3] = {c[0] - d[0] * t, c[1] - d[1] * t, c[2] - d[2] * t};
-		if (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] > 96.0f * 96.0f)
+		if (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] > 160.0f * 160.0f)
 			continue;
 		RigBox boxes[MAX_RIG_BOXES];
 		int n = BuildRig(p, g_hidden[h].rig, boxes);

@@ -95,9 +95,16 @@ const BlockDef g_blocks[] = {
 	{ "redstone_lamp",          SHAPE_CUBE,   "redstone_lamp",            "redstone_lamp",            "redstone_lamp",            0.3f, TOOL_NONE,    SOUND_GLASS,  0,                          nullptr },
 	{ "redstone_block",         SHAPE_CUBE,   "redstone_block",           "redstone_block",           "redstone_block",           5.0f, TOOL_PICKAXE, SOUND_METAL,  0,                          nullptr },
 	// fire (mc_fire.cpp): lit with flint and steel, eats BF_FLAMMABLE blocks and the classic map's crates and doors
+	// the enchanting table (mc_enchant_srv.cpp); bookshelves two cells out raise what it offers
+	{ "enchanting_table",       SHAPE_TABLE,  "enchanting_table_top",     "enchanting_table_side",    "enchanting_table_bottom",  5.0f, TOOL_PICKAXE, SOUND_STONE,  BF_TRANSPARENT | BF_ALPHATEST, nullptr },
 	// a plain torch: light level 14, stands on a floor or leans from a wall, pops off when what holds it goes
 	{ "torch",                  SHAPE_TORCH,  "torch",                    "torch",                    "torch",                    0.0f, TOOL_NONE,    SOUND_WOOD,   BF_TRANSPARENT | BF_ALPHATEST | BF_EMISSIVE, nullptr },
 	{ "fire",                   SHAPE_FIRE,   "fire_0",                   "fire_0",                   "fire_1",                   0.0f, TOOL_NONE,    SOUND_WOOL,   BF_TRANSPARENT | BF_ALPHATEST | BF_EMISSIVE, "" },
+	// the head of an iron golem (mc_mobs.cpp): set on four iron blocks in a T it brings one to life
+	// the body and the heads of a wither (mc_mobs.cpp): four soul sand in a T, three skulls along the top
+	{ "soul_sand",              SHAPE_CUBE,   "soul_sand",                "soul_sand",                "soul_sand",                0.5f, TOOL_SHOVEL,  SOUND_SAND,   0,                          nullptr },
+	{ "wither_skeleton_skull",  SHAPE_CUBE,   "wither_skull_top",         "wither_skull_front",       "wither_skull_top",         1.0f, TOOL_NONE,    SOUND_STONE,  0,                          nullptr },
+	{ "carved_pumpkin",         SHAPE_CUBE,   "pumpkin_top",              "carved_pumpkin",           "pumpkin_top",              1.0f, TOOL_AXE,     SOUND_WOOD,   0,                          nullptr },
 };
 // clang-format on
 const int g_numBlocks = (int)(sizeof(g_blocks) / sizeof(g_blocks[0]));
@@ -160,5 +167,22 @@ int FindBlock(const char* name)
 		if (!strcmp(g_dynBlocks[i].name, name))
 			return DYN_BLOCK_BASE + i;
 	return -1;
+}
+
+int BulletClassOf(const BlockDef& d, bool classicMap)
+{
+	if (d.hardness < 0.0f)
+		return BULLET_STOPS;
+	if (!strcmp(d.name, "glass"))
+		return BULLET_SHATTERS;
+	if (d.shape == SHAPE_PANE)
+		return BULLET_BARS;
+	if (d.tool == TOOL_PICKAXE)
+		return BULLET_STOPS;
+	if (d.tool == TOOL_AXE)
+		return BULLET_WOOD;
+	if (d.tool == TOOL_SHOVEL)
+		return classicMap ? BULLET_PASSES : BULLET_STOPS;
+	return BULLET_PASSES;
 }
 } // namespace mcw

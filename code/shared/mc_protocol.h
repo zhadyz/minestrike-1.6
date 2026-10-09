@@ -14,6 +14,8 @@ namespace mcp
 #define MCMSG_HELLO "McHello" // map/world info + server settings
 #define MCMSG_TOAST "McToast" // Minecraft-style chat/actionbar text: byte kind, string
 #define MCMSG_INVMAIN "McInvM" // survival inventory: 27 storage slots, 4 craft slots, craft result, cursor
+#define MCMSG_ENCHUI "McEnchUI" // enchanting screen: byte open, byte item slot (0 none), 3 x (byte level asked, byte clue kind, byte clue level), long seed
+#define MCMSG_ENCH "McEnch"    // enchanted inventory slots: byte n, then n x (byte inventory-screen slot, short enchantments)
 
 enum FxType : uint8_t
 {
@@ -61,6 +63,7 @@ enum EntKind : uint8_t
 	MCE_TNT = 6,       // data = fuse ticks left
 	MCE_FALLING = 7,   // data = block cell
 	MCE_XPBOTTLE = 8,
+	MCE_SKULL = 9,     // a wither's skull; data = 1 for a blue one
 };
 inline int MakeEntMarker(int kind, int data) { return (MCE_MAGIC << 24) | ((kind & 0xFF) << 16) | (data & 0xFFFF); }
 inline bool IsMcEnt(int iuser4) { return ((iuser4 >> 24) & 0xFF) == MCE_MAGIC; }
@@ -79,6 +82,7 @@ static const int MCPF_FLYING = 1 << 12;   // creative flight active
 static const int MCPF_ARMOR = 1 << 13;    // wearing any Minecraft armor piece
 static const int MCPF_XBOW_LOADED = 1 << 14; // the held crossbow is loaded
 static const int MCPF_USING = 1 << 15;       // drawing a bow / charging a crossbow / eating
+static const int MCPF_MOB_SWING = 1 << 6;  // an iron golem with its arms up for a blow
 static const int MCPF_SWELL_SHIFT = 1;     // creeper fuse in ticks (0..30), bits 1-5
 static const int MCPF_SWELL_MASK = 0x1F << MCPF_SWELL_SHIFT;
 inline int SwellOf(int iuser4) { return (iuser4 & MCPF_SWELL_MASK) >> MCPF_SWELL_SHIFT; }

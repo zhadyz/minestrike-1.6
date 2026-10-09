@@ -8,10 +8,14 @@ import os
 import numpy as np
 from PIL import Image
 
-ROOT = 'Z:/dev/CSminecraft'
-OUT = f'{ROOT}/game/Half-Life/cstrike/gfx/env'
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')).replace(os.sep, '/')
+CSTRIKE = (os.environ.get('MINESTRIKE_CSTRIKE') or f'{ROOT}/game/Half-Life/cstrike').replace(os.sep, '/')
+OUT = f'{CSTRIKE}/gfx/env'
 SUN = f'{ROOT}/assets/mc/jar/assets/minecraft/textures/environment/celestial/sun.png'
 SUN_ALT = f'{ROOT}/assets/mc/jar/assets/minecraft/textures/environment/sun.png'
+if not os.path.exists(SUN) and not os.path.exists(SUN_ALT):  # (an installed copy has the textures in the game folder only)
+    SUN = f'{CSTRIKE}/mc/textures/environment/celestial/sun.png'
+    SUN_ALT = f'{CSTRIKE}/mc/textures/environment/sun.png'
 N = 256
 
 ZENITH = np.array([120, 167, 255], np.float32)

@@ -19,15 +19,18 @@ from bsp30 import Bsp30
 from mcw_io import read_mcw
 import walkability as walk
 
-MAPS = r"Z:\dev\CSminecraft\game\Half-Life\cstrike\maps"
-REGISTRY = r"Z:\dev\CSminecraft\code\shared\mc_blocks.cpp"
-SHAPES = {"SHAPE_NONE": 0, "SHAPE_CUBE": 1, "SHAPE_SLAB": 2, "SHAPE_STAIRS": 3, "SHAPE_DOOR": 4, "SHAPE_PANE": 5, "SHAPE_CROSS": 6}
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+MAPS = os.path.join(os.environ.get("MINESTRIKE_GAME") or os.path.join(_ROOT, "game", "Half-Life"), "cstrike", "maps")
+REGISTRY = os.path.join(_ROOT, "code", "shared", "mc_blocks.cpp")
+SHAPES = {"SHAPE_NONE": 0, "SHAPE_CUBE": 1, "SHAPE_SLAB": 2, "SHAPE_STAIRS": 3, "SHAPE_DOOR": 4, "SHAPE_PANE": 5, "SHAPE_CROSS": 6,
+          "SHAPE_DUST": 7, "SHAPE_TORCH": 8, "SHAPE_LEVER": 9, "SHAPE_BUTTON": 10, "SHAPE_PLATE": 11, "SHAPE_REPEATER": 12,
+          "SHAPE_FIRE": 13, "SHAPE_TABLE": 14}
 
 
 def main(log=print):
     problems = []
     src = open(REGISTRY, encoding="utf-8").read()
-    reg = {n: SHAPES[s] for n, s in re.findall(r'\{\s*"([a-z_0-9]+)",\s*(SHAPE_\w+)', src)}
+    reg = {n: SHAPES.get(s, 7) for n, s in re.findall(r'\{\s*"([a-z_0-9]+)",\s*(SHAPE_\w+)', src)}
     W = read_mcw(os.path.join(MAPS, "mc_dust2.mcw"))
     M = json.load(open(os.path.join(MAPS, "mc_dust2.json")))
     sx, sy, sz = W["size"]

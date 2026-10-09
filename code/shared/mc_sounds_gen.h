@@ -75,6 +75,17 @@ enum Sound : int
 	MCS_FLINT_USE, // item.flintandsteel.use
 	MCS_FIRE_AMBIENT, // block.fire.ambient
 	MCS_PLAYER_HURT_FIRE, // entity.player.hurt_on_fire
+	MCS_ENCHANT, // block.enchantment_table.use
+	MCS_IRON_GOLEM_ATTACK, // entity.iron_golem.attack
+	MCS_IRON_GOLEM_HURT, // entity.iron_golem.hurt
+	MCS_IRON_GOLEM_DEATH, // entity.iron_golem.death
+	MCS_IRON_GOLEM_STEP, // entity.iron_golem.step
+	MCS_WITHER_SPAWN, // entity.wither.spawn
+	MCS_WITHER_AMBIENT, // entity.wither.ambient
+	MCS_WITHER_SHOOT, // entity.wither.shoot
+	MCS_WITHER_HURT, // entity.wither.hurt
+	MCS_WITHER_DEATH, // entity.wither.death
+	MCS_WITHER_BREAK_BLOCK, // entity.wither.break_block
 	MCS_STONE_BREAK, // block.stone.break
 	MCS_STONE_HIT, // block.stone.hit
 	MCS_STONE_PLACE, // block.stone.place

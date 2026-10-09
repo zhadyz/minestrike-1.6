@@ -107,15 +107,8 @@ static CmdFn g_origBuy = nullptr;
 static cvar_t* g_cvBuyInv = nullptr;
 static void Cmd_Buy()
 {
-	// classic maps play like Counter-Strike: B is the buy menu (Minecraft gear is a category in it)
-	extern bool WorldIsClassic();
-	if (WorldIsClassic() && !g_cl.creative)
-	{
-		if (g_origBuy)
-			g_origBuy();
-		return;
-	}
-	// B opens the Minecraft creative inventory (server text menu); mc_buy_inventory 0 restores CS's
+	// B opens the shop screen on every map: Counter-Strike's guns and the Minecraft items, each with its
+	// price (mc_gui.cpp); mc_buy_inventory 0 restores CS's own buy menu
 	if (!g_cvBuyInv)
 		g_cvBuyInv = gEngfuncs.pfnGetCvarPointer("mc_buy_inventory");
 	if (g_cvBuyInv && g_cvBuyInv->value == 0.0f)

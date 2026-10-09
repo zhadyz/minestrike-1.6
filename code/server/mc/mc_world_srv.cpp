@@ -7,6 +7,7 @@
 #include "mc_move.h"
 #include "mc_classic.h"
 #include "mc_items.h"
+#include "mc_enchant.h"
 
 #include <unordered_map>
 #include <vector>
@@ -32,12 +33,24 @@ static mcc::Classic g_classic;
 static bool g_classicMode = false;
 bool ClassicMode() { return g_classicMode; }
 mcc::Classic* ClassicWorld() { return g_classicMode ? &g_classic : nullptr; }
+// no blocks this near the other side's spawn points, in units (0: anywhere)
+static cvar_t cv_spawnGuard = {"mc_spawn_guard", "320", FCVAR_SERVER, 320.0f, nullptr};
+// ... for so many seconds from the start of a round: afterwards it is ground like any other
+static cvar_t cv_spawnGuardTime = {"mc_spawn_guard_time", "25", FCVAR_SERVER, 25.0f, nullptr};
+static std::vector<Vector> g_spawns[2]; // the Terrorists' spawn points, the Counter-Terrorists'
+static bool g_spawnsKnown = false;
+static std::unordered_map<uint32_t, uint16_t> g_owner; // flat index -> who set the block down: side, and player index << 8
+// the planted bomb, remembered from the plant (Counter-Strike's search by class name does not find it)
+static edict_t* g_bombEd = nullptr;
+static int g_bombSerial = 0;
+static bool g_blastThroughAll = false; // (a wither's blue skull: every block but bedrock is as soft as dirt to it)
 
 extern int MsgVox();
 extern int MsgBreak();
 extern int MsgHello();
 extern void PrimeTnt(const float* origin, int fuse);
 extern void SpawnFallingBlock(int x, int y, int z, mcw::Cell cell);
+static bool HullBlocksPlace(int x, int y, int z);
 
 static const float B2U = 40.0f;
 
@@ -49,6 +62,14 @@ static void (*o_TraceLine)(const float*, const float*, int, edict_t*, TraceResul
 static void (*o_TraceHull)(const float*, const float*, int, int, edict_t*, TraceResult*);
 static int (*o_TraceMonsterHull)(edict_t*, const float*, const float*, int, edict_t*, TraceResult*);
 static int (*o_PointContents)(const float*);
+
+// (what the last Merge stopped at, when that was the mod's world: for the bullet rules below)
+static struct
+{
+	bool hit = false;
+	Vector pos;
+	mcw::Cell cell = 0;
+} g_mergeHit;
 
 static void Merge(TraceResult* ptr, const float* v1, const float* v2, const float mins[3], const float maxs[3])
 {
@@ -68,6 +89,9 @@ static void Merge(TraceResult* ptr, const float* v1, const float* v2, const floa
 	}
 	if (vt.hit && vt.fraction < ptr->flFraction)
 	{
+		g_mergeHit.hit = true;
+		g_mergeHit.pos = Vector(vt.endpos[0], vt.endpos[1], vt.endpos[2]);
+		g_mergeHit.cell = vt.cell;
 		ptr->flFraction = vt.fraction;
 		ptr->vecEndPos = Vector(vt.endpos[0], vt.endpos[1], vt.endpos[2]);
 		ptr->vecPlaneNormal = Vector(vt.normal[0], vt.normal[1], vt.normal[2]);
@@ -78,17 +102,157 @@ static void Merge(TraceResult* ptr, const float* v1, const float* v2, const floa
 	}
 }
 
+// ---------------------------------------------------------------------------------------------
+// Bullets and blocks. What a block is made of decides what a bullet does at it:
+//  - what a pickaxe is for (stone, bricks, obsidian, metal): the bullet stops. No gun goes through.
+//  - what an axe is for (planks, logs, wooden doors, crates): Counter-Strike's rule for wood. A gun that
+//    goes through walls (the rifles, the Deagle) comes out the other side with 60% of its damage; pistols,
+//    submachine guns and buckshot stop.
+//  - glass: the bullet goes on and the glass shatters. Iron bars: the bullet goes on.
+//  - the rest (wool, leaves, hay, and on a classic map sand, gravel and dirt): the bullet goes on as if
+//    nothing were there. They hide, they do not protect.
+// A look that Counter-Strike lets through glass (a bot's eyes) goes through glass blocks and iron bars too.
+enum
+{
+	BM_HARD = mcw::BULLET_STOPS,
+	BM_WOOD = mcw::BULLET_WOOD,
+	BM_SOFT = mcw::BULLET_PASSES,
+	BM_GLASS = mcw::BULLET_SHATTERS,
+	BM_BARS = mcw::BULLET_BARS
+};
+static uint8_t g_bulletMat[1024], g_passBullet[1024], g_passSight[1024];
+static int g_matBlocks = -1;
+static bool g_matClassic = false;
+
+static int BulletMaterialOf(const mcw::BlockDef& d) { return mcw::BulletClassOf(d, g_classicMode); }
+
+static void MatTables()
+{
+	// (a classic map registers a block for each of its textures when it loads)
+	if (g_matBlocks == mcw::g_numDynBlocks && g_matClassic == g_classicMode)
+		return;
+	g_matBlocks = mcw::g_numDynBlocks;
+	g_matClassic = g_classicMode;
+	memset(g_bulletMat, 0, sizeof(g_bulletMat));
+	memset(g_passBullet, 0, sizeof(g_passBullet));
+	memset(g_passSight, 0, sizeof(g_passSight));
+	for (int i = 1; i < 1024; i++)
+	{
+		if (i >= mcw::g_numBlocks && !(i >= mcw::DYN_BLOCK_BASE && i < mcw::DYN_BLOCK_BASE + mcw::g_numDynBlocks))
+			continue;
+		int m = BulletMaterialOf(mcw::Block((uint16_t)i));
+		g_bulletMat[i] = (uint8_t)m;
+		g_passBullet[i] = m == BM_SOFT || m == BM_GLASS || m == BM_BARS;
+		g_passSight[i] = m == BM_GLASS || m == BM_BARS;
+	}
+}
+
+// 0 stops every bullet, 1 lets the guns through that go through walls, 2 stops none (the shop says which)
+int BlockBulletClass(const char* blockName)
+{
+	int type = blockName ? mcw::FindBlock(blockName) : -1;
+	if (type < 0)
+		return 0;
+	int m = BulletMaterialOf(mcw::Block((uint16_t)type));
+	return m == BM_HARD ? 0 : m == BM_WOOD ? 1 : 2;
+}
+
+// What the last bullet's trace stopped at, if that was a block: Counter-Strike asks about it right after
+// (the texture under the hit, and whether the bullet may go on through it).
+static struct
+{
+	bool valid = false;
+	float start[3];
+	Vector pos;
+	int mat = BM_HARD;
+} g_bulletStop;
+void BreakBlock(int x, int y, int z, CBasePlayer* by, bool drop);
+
+// The glass a bullet went through on its way from a to b
+static void ShatterGlass(const Vector& a, const Vector& b)
+{
+	float o[3], d[3], tMax[3], tDelta[3];
+	int c[3], step[3];
+	for (int k = 0; k < 3; k++)
+	{
+		o[k] = (a[k] - g_world.origin[k]) / B2U;
+		d[k] = (b[k] - a[k]) / B2U;
+		c[k] = (int)floorf(o[k]);
+		step[k] = d[k] > 0.0f ? 1 : -1;
+		if (fabsf(d[k]) < 1e-6f)
+			tMax[k] = tDelta[k] = 1e30f;
+		else
+		{
+			tMax[k] = ((d[k] > 0.0f ? c[k] + 1 : c[k]) - o[k]) / d[k];
+			tDelta[k] = (float)step[k] / d[k];
+		}
+	}
+	for (int guard = 0; guard < 700; guard++)
+	{
+		mcw::Cell cell = g_world.Get(c[0], c[1], c[2]);
+		if (cell && g_bulletMat[mcw::CellType(cell) & 1023] == BM_GLASS)
+			BreakBlock(c[0], c[1], c[2], nullptr, false);
+		int k = tMax[0] < tMax[1] ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
+		if (tMax[k] > 1.0f)
+			break;
+		c[k] += step[k];
+		tMax[k] += tDelta[k];
+	}
+}
+
+// whose bullet is in the air (a hit dealt in the same frame by that player with DMG_BULLET is his bullet's)
+static edict_t* g_bulletBy = nullptr;
+static float g_bulletTime = -1.0f;
+bool WasBulletOf(entvars_t* shooter) { return shooter && g_bulletBy && shooter == &g_bulletBy->v && g_bulletTime == gpGlobals->time; }
+
 static void W_TraceLine(const float* v1, const float* v2, int noMonsters, edict_t* skip, TraceResult* ptr)
 {
+	MC_WHERE("an engine line trace through the mod's world");
+	// Counter-Strike marks the traces its bullets make (FireBullets, FireBuckshots, FireBullets3)
+	bool bullet = (gpGlobals->trace_flags & FTRACE_BULLET) != 0;
+	if (bullet)
+	{
+		g_bulletBy = skip;
+		g_bulletTime = gpGlobals->time;
+	}
+	bool throughGlass = (noMonsters & 0x100) != 0;
 	// players drawn as Minecraft models are hit where the model is, not where CS's hidden one is (mc_hitbox.cpp)
 	bool rigs = (noMonsters & 0xFF) != ignore_monsters && HitRigsHide(skip);
 	o_TraceLine(v1, v2, noMonsters, skip, ptr);
+	gpGlobals->trace_flags &= ~FTRACE_BULLET;
 	if (rigs)
 		HitRigsRestore();
 	static const float zero[3] = {0, 0, 0};
+	if (g_worldLoaded && (bullet || throughGlass))
+	{
+		MatTables();
+		mcw::g_tracePass = bullet ? g_passBullet : g_passSight;
+	}
+	g_mergeHit.hit = false;
 	Merge(ptr, v1, v2, zero, zero);
+	mcw::g_tracePass = nullptr;
 	if (rigs)
 		HitRigsTrace(v1, v2, ptr);
+	if (!bullet || !g_worldLoaded)
+		return;
+	g_bulletStop.valid = false;
+	if (g_mergeHit.hit && g_mergeHit.cell && ptr->pHit == INDEXENT(0) && (ptr->vecEndPos - g_mergeHit.pos).Length() < 0.5f)
+	{
+		g_bulletStop.valid = true;
+		g_bulletStop.pos = g_mergeHit.pos;
+		g_bulletStop.mat = g_bulletMat[mcw::CellType(g_mergeHit.cell) & 1023];
+		for (int k = 0; k < 3; k++)
+			g_bulletStop.start[k] = v1[k];
+	}
+	ShatterGlass(Vector(v1[0], v1[1], v1[2]), ptr->vecEndPos);
+}
+
+// May the bullet go on through what it hit? Not through a block a pickaxe is for.
+bool H_IsPenetrable(IReGameHook_IsPenetrableEntity* chain, Vector& src, Vector& end, entvars_t* attacker, edict_t* hit)
+{
+	if (g_bulletStop.valid && g_bulletStop.mat == BM_HARD && (end - g_bulletStop.pos).Length() < 1.0f)
+		return false;
+	return chain->callNext(src, end, attacker, hit);
 }
 
 static void HullSize(int hull, float mins[3], float maxs[3])
@@ -106,6 +270,7 @@ static void HullSize(int hull, float mins[3], float maxs[3])
 
 static void W_TraceHull(const float* v1, const float* v2, int noMonsters, int hull, edict_t* skip, TraceResult* ptr)
 {
+	MC_WHERE("an engine hull trace through the mod's world");
 	o_TraceHull(v1, v2, noMonsters, hull, skip, ptr);
 	float mins[3], maxs[3];
 	HullSize(hull, mins, maxs);
@@ -132,6 +297,10 @@ static int W_PointContents(const float* v)
 static const char* (*o_TraceTexture)(edict_t*, const float*, const float*);
 static const char* W_TraceTexture(edict_t* ent, const float* v1, const float* v2)
 {
+	// the bullet that has just stopped at a block: wood counts as Counter-Strike's wood, the rest as concrete
+	if (g_bulletStop.valid && v1[0] == g_bulletStop.start[0] && v1[1] == g_bulletStop.start[1] && v1[2] == g_bulletStop.start[2] &&
+		(!ent || ent == INDEXENT(0)))
+		return g_bulletStop.mat == BM_WOOD ? "64crate0" : "";
 	if (g_classicMode && (!ent || ent == INDEXENT(0)))
 	{
 		if (const char* t = mcm::WorldTraceTexture(v1, v2))
@@ -142,6 +311,8 @@ static const char* W_TraceTexture(edict_t* ent, const float* v1, const float* v2
 
 void InstallEngineTraceWrappers()
 {
+	CVAR_REGISTER(&cv_spawnGuard);
+	CVAR_REGISTER(&cv_spawnGuardTime);
 	o_TraceTexture = g_engfuncs.pfnTraceTexture;
 	g_engfuncs.pfnTraceTexture = W_TraceTexture;
 	o_TraceLine = g_engfuncs.pfnTraceLine;
@@ -317,6 +488,8 @@ void OnServerActivate()
 	g_worldLoaded = false;
 	FireReset();
 	g_changed.clear();
+	g_owner.clear();
+	g_spawnsKnown = false;
 	g_pending.clear();
 	mcm::SetWorld(nullptr);
 	StepHeight = 18.0f;
@@ -350,6 +523,7 @@ void OnServerActivate()
 
 void OnServerDeactivate()
 {
+	BotTacticsMapEnd();
 	g_worldLoaded = false;
 	mcm::SetWorld(nullptr);
 }
@@ -360,6 +534,8 @@ size_t ChangedCells() { return g_changed.size(); }
 void ResetWorld()
 {
 	FireReset();
+	g_owner.clear();
+	g_bombEd = nullptr;
 	if (!g_worldLoaded || g_changed.empty())
 		return;
 	g_cells = g_originalCells;
@@ -444,12 +620,152 @@ static Vector BlockCenter(int x, int y, int z)
 
 static void CheckFalling(int x, int y, int z);
 
+// A block somebody set down, as opposed to the map itself: what a wall is made of, and all a bot may mine.
+bool IsPlacedBlock(int x, int y, int z)
+{
+	if (!g_worldLoaded || !g_world.InBounds(x, y, z))
+		return false;
+	mcw::Cell c = g_world.Get(x, y, z);
+	if (!c)
+		return false;
+	if (g_classicMode)
+	{
+		if (mcw::CellType(c) == g_classic.carvedType)
+			return false;
+	}
+	else if (g_changed.find((uint32_t)(((size_t)z * g_world.sy + y) * g_world.sx + x)) == g_changed.end())
+		return false; // a block map: only what changed since it was loaded
+	mcw::LocalBox lb[4];
+	return mcw::ShapeBoxes(g_world.ShapeAt(x, y, z), mcw::CellState(c), lb) > 0;
+}
+
+// Whose block it is: the side of whoever set it down. A block of your own side comes away in your hands at
+// once (MineFrame), so nobody is walled in by a teammate and a builder can open his own wall again.
+static uint32_t CellIndex(int x, int y, int z) { return (uint32_t)(((size_t)z * g_world.sy + y) * g_world.sx + x); }
+int BlockOwner(int x, int y, int z)
+{
+	if (!g_worldLoaded || !g_world.InBounds(x, y, z))
+		return 0;
+	auto it = g_owner.find(CellIndex(x, y, z));
+	return it == g_owner.end() ? 0 : (it->second & 0xFF);
+}
+// Who set it down, if he is still there and on the same side (TNT lit by redstone is his: a mine's kills)
+CBasePlayer* BlockPlacer(int x, int y, int z)
+{
+	if (!g_worldLoaded || !g_world.InBounds(x, y, z))
+		return nullptr;
+	auto it = g_owner.find(CellIndex(x, y, z));
+	if (it == g_owner.end())
+		return nullptr;
+	CBasePlayer* p = UTIL_PlayerByIndex(it->second >> 8);
+	return (p && p->m_iTeam == (it->second & 0xFF)) ? p : nullptr;
+}
+static void SetOwner(int x, int y, int z, CBasePlayer* pl)
+{
+	if (pl && (pl->m_iTeam == TERRORIST || pl->m_iTeam == CT) && g_world.InBounds(x, y, z))
+		g_owner[CellIndex(x, y, z)] = (uint16_t)(pl->m_iTeam | (pl->entindex() << 8));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Where no block may go
+//  - Around a planted bomb: its own column and the eight around it, three cells high. Whatever stands there
+//    when the bomb is planted comes down. A wall further out is a wall like any other: it can be dug.
+//  - Near the other side's spawn points (mc_spawn_guard units; 0: anywhere), in the first seconds of a round
+//    (mc_spawn_guard_time): nobody is walled in where he spawns. Later it is ground like any other.
+
+static CGrenade* PlantedBomb()
+{
+	edict_t* e = g_bombEd;
+	if (!e || e->free || e->serialnumber != g_bombSerial || !e->pvPrivateData || (e->v.flags & FL_KILLME))
+		return nullptr;
+	CGrenade* g = static_cast<CGrenade*>(CBaseEntity::Instance(e));
+	return (g && g->m_bIsC4 && !g->m_bJustBlew) ? g : nullptr;
+}
+
+// The cell the bomb lies in (it drops to the floor from the planter's hands: the floor under it counts)
+static void BombCellAt(const Vector& at, int out[3])
+{
+	static const float zero[3] = {0, 0, 0};
+	float s[3] = {at.x, at.y, at.z + 2.0f}, e[3] = {at.x, at.y, at.z - 80.0f};
+	mcw::Trace t;
+	mcm::WorldTrace(s, e, zero, zero, t);
+	float p[3] = {at.x, at.y, ((t.hit && !t.startsolid) ? t.endpos[2] : at.z) + 8.0f};
+	g_world.ToBlock(p, out);
+}
+
+CGrenade* PlantedBombEnt() { return PlantedBomb(); }
+
+bool BombKeepsFree(int x, int y, int z)
+{
+	if (!g_worldLoaded)
+		return false;
+	CGrenade* g = PlantedBomb();
+	if (!g)
+		return false;
+	int b[3];
+	BombCellAt(g->pev->origin, b);
+	return abs(x - b[0]) <= 1 && abs(y - b[1]) <= 1 && z >= b[2] && z <= b[2] + 2;
+}
+
+void BreakBlock(int x, int y, int z, CBasePlayer* by, bool drop);
+void BombClearsSpace(CGrenade* bomb)
+{
+	if (!g_worldLoaded || !bomb)
+		return;
+	g_bombEd = bomb->edict();
+	g_bombSerial = g_bombEd->serialnumber;
+	int b[3], n = 0;
+	BombCellAt(bomb->pev->origin, b);
+	for (int dz = 0; dz <= 2; dz++)
+		for (int dy = -1; dy <= 1; dy++)
+			for (int dx = -1; dx <= 1; dx++)
+				if (IsPlacedBlock(b[0] + dx, b[1] + dy, b[2] + dz))
+				{
+					BreakBlock(b[0] + dx, b[1] + dy, b[2] + dz, nullptr, true);
+					n++;
+				}
+	if (n)
+		McLog("bomb: planted at %d %d %d, %d blocks around it came down", b[0], b[1], b[2], n);
+}
+
+// Why this player may not set a block into the cell (nullptr: he may)
+static const char* PlaceRefusal(CBasePlayer* pl, int x, int y, int z)
+{
+	if (!pl || P(pl).creative)
+		return nullptr;
+	if (BombKeepsFree(x, y, z))
+		return "The bomb keeps the space around it free";
+	if (cv_spawnGuard.value > 0.0f && (pl->m_iTeam == TERRORIST || pl->m_iTeam == CT) && CSGameRules() &&
+		(CSGameRules()->IsFreezePeriod() || gpGlobals->time - CSGameRules()->m_fRoundStartTime < cv_spawnGuardTime.value))
+	{
+		if (!g_spawnsKnown)
+		{
+			g_spawnsKnown = true;
+			static const char* kSpawn[2] = {"info_player_deathmatch", "info_player_start"};
+			for (int s = 0; s < 2; s++)
+			{
+				g_spawns[s].clear();
+				CBaseEntity* e = nullptr;
+				while ((e = UTIL_FindEntityByClassname(e, kSpawn[s])) != nullptr)
+					g_spawns[s].push_back(e->pev->origin);
+			}
+		}
+		Vector c = BlockCenter(x, y, z);
+		for (const Vector& s : g_spawns[pl->m_iTeam == TERRORIST ? 1 : 0])
+			if ((c - s).Length2D() < cv_spawnGuard.value && fabsf(c.z - s.z) < 160.0f)
+				return "No building at the enemy spawn this early in the round";
+	}
+	return nullptr;
+}
+
 void SetBlock(int x, int y, int z, mcw::Cell c, bool broadcast)
 {
 	if (!g_worldLoaded || !g_world.InBounds(x, y, z))
 		return;
 	if (g_world.Get(x, y, z) == c)
 		return;
+	if (mcw::CellType(g_world.Get(x, y, z)) != mcw::CellType(c))
+		g_owner.erase(CellIndex(x, y, z)); // (a door that swings stays whose it was)
 	g_world.Set(x, y, z, c);
 	RedstoneCellChanged(x, y, z, c);
 	uint32_t idx = (uint32_t)(((size_t)z * g_world.sy + y) * g_world.sx + x);
@@ -615,17 +931,34 @@ static bool ToolMatches(const mci::ItemDef& tool, const mcw::BlockDef& block)
 	}
 }
 
-void MineFrame(CBasePlayer* pl, bool holding)
+void MineFrame(CBasePlayer* pl, bool holding, const int* forced, bool mapToo)
 {
 	McPlayer& mp = P(pl);
 	int b[3], face;
 	float dist;
 	bool classicHit = false;
-	bool has = holding && PickTarget(pl, b, &face, &dist, &classicHit);
-	if (has && classicHit && !g_classic.Diggable(b[0], b[1], b[2]))
-		has = false; // sky, bedrock, outside the dig grid
+	bool has;
+	if (forced)
+	{
+		// a bot works on the block it chose (mc_bottactics.cpp), and only on blocks somebody set down:
+		// bots never dig the map
+		b[0] = forced[0];
+		b[1] = forced[1];
+		b[2] = forced[2];
+		dist = (BlockCenter(b[0], b[1], b[2]) - (pl->pev->origin + pl->pev->view_ofs)).Length();
+		// (mapToo: the one cell of the map a bot may dig out, for the mine it buries)
+		bool placed = IsPlacedBlock(b[0], b[1], b[2]);
+		classicHit = !placed && mapToo && g_classicMode && g_classic.Diggable(b[0], b[1], b[2]) && !g_classic.Carved(b[0], b[1], b[2]);
+		has = holding && (placed || classicHit) && dist <= mci::BLOCK_REACH + B2U * 0.5f;
+	}
+	else
+	{
+		has = holding && PickTarget(pl, b, &face, &dist, &classicHit);
+		if (has && classicHit && !g_classic.Diggable(b[0], b[1], b[2]))
+			has = false; // sky, bedrock, outside the dig grid
+	}
 	static bool lastHas = false;
-	if (holding && has != lastHas)
+	if (!forced && holding && has != lastHas)
 	{
 		lastHas = has;
 		McLog("mine: target %s %d %d %d dist %.0f", has ? "yes" : "no", b[0], b[1], b[2], has ? dist : 0.0f);
@@ -659,7 +992,14 @@ void MineFrame(CBasePlayer* pl, bool holding)
 	const mci::ItemDef& tool = held.Empty() ? mci::g_items[0] : mci::Item(held.id);
 	bool correct = ToolMatches(tool, d) && d.tool != mcw::TOOL_NONE;
 	bool canHarvest = d.tool != mcw::TOOL_PICKAXE || tool.type == mci::IT_PICKAXE; // stone-like needs a pickaxe
-	float secs = mp.creative ? 0.0f : mci::BreakSeconds(d.hardness, tool.miningSpeed, correct, canHarvest);
+	// Efficiency: the level squared plus one, on top of the right tool's speed
+	float toolSpeed = tool.miningSpeed;
+	if (correct && !held.Empty() && mce::Main(held.ench))
+		toolSpeed += mce::Main(held.ench) * mce::Main(held.ench) + 1.0f;
+	float secs = mp.creative ? 0.0f : mci::BreakSeconds(d.hardness, toolSpeed, correct, canHarvest);
+	bool ownSide = !classicHit && pl->m_iTeam != 0 && BlockOwner(b[0], b[1], b[2]) == pl->m_iTeam;
+	if (ownSide)
+		secs = 0.0f; // a block of your own side comes away at once
 
 	float dt = gpGlobals->frametime;
 	if (secs <= 0.0f)
@@ -669,6 +1009,8 @@ void MineFrame(CBasePlayer* pl, bool holding)
 		mp.mineLastHitSound = gpGlobals->time;
 		breakIt(!mp.creative);
 		mp.mineProgress = 0.0f;
+		if (ownSide)
+			FxSwing(pl->entindex());
 		return;
 	}
 	mp.mineProgress += dt / secs;
@@ -748,13 +1090,29 @@ bool PartSupported(int x, int y, int z)
 	}
 	if (g_classicMode)
 	{
+		// The classic map's walls are not on the grid, and some lean: the wall behind a part can be most of
+		// a cell away, and a leaning one can pass beside the middle of the cell. Look along the attach
+		// direction through the middle and through eight lines around it, a cell past the cell's face (the
+		// client draws the part on the surface it finds the same way, SurfaceOffset in mc_world_cl.cpp).
 		Vector ctr = BlockCenter(x, y, z);
-		float st[3] = {ctr.x - a[0] * 18.0f, ctr.y - a[1] * 18.0f, ctr.z - a[2] * 18.0f};
-		float en[3] = {ctr.x + a[0] * (B2U * 0.5f + 4.0f), ctr.y + a[1] * (B2U * 0.5f + 4.0f), ctr.z + a[2] * (B2U * 0.5f + 4.0f)};
-		float zero[3] = {0, 0, 0};
-		mcc::Result r;
-		g_classic.Trace(st, en, zero, zero, r);
-		return r.hit && !r.startsolid;
+		int u = a[0] ? 1 : 0, v = a[2] ? 1 : 2; // the two axes across the attach direction
+		for (int i = -1; i <= 1; i++)
+			for (int j = -1; j <= 1; j++)
+			{
+				float c[3] = {ctr.x, ctr.y, ctr.z};
+				c[u] += i * 12.0f;
+				c[v] += j * 12.0f;
+				float st[3], en[3], zero[3] = {0, 0, 0};
+				for (int k = 0; k < 3; k++)
+				{
+					st[k] = c[k] - a[k] * 18.0f;
+					en[k] = c[k] + a[k] * (B2U * 1.5f);
+				}
+				mcc::Result r;
+				g_classic.Trace(st, en, zero, zero, r);
+				if (r.hit && !r.startsolid)
+					return true;
+			}
 	}
 	return false;
 }
@@ -792,8 +1150,112 @@ void ToggleDoor(int x, int y, int z)
 	FxSound(snd, BlockCenter(x, y, lower), 1.0f, 0.9f + RANDOM_FLOAT(0.0f, 0.1f));
 }
 
+// The enchanting table is drawn standing on the floor under it, which on a classic map is not on the grid
+// (the client's SurfaceOffset): the height of its base.
+static float TableBaseZ(int x, int y, int z)
+{
+	float bottom = g_world.origin[2] + z * B2U;
+	if (!g_classicMode)
+		return bottom;
+	mcw::Cell below = g_world.Get(x, y, z - 1);
+	if (below && mcw::CellType(below) != g_classic.carvedType)
+	{
+		mcw::LocalBox lb[4];
+		if (mcw::ShapeBoxes(g_world.ShapeAt(x, y, z - 1), mcw::CellState(below), lb) > 0)
+			return bottom;
+	}
+	Vector c = BlockCenter(x, y, z);
+	float s[3] = {c.x, c.y, c.z + B2U * 0.45f}, e[3] = {c.x, c.y, c.z - B2U}, zero[3] = {0, 0, 0};
+	mcc::Result r;
+	g_classic.Trace(s, e, zero, zero, r);
+	return (r.hit && !r.startsolid) ? r.endpos[2] : bottom;
+}
+
+// The enchanting table the player is looking at, by the box it is drawn in rather than its cell
+static bool TableInView(CBasePlayer* pl, int out[3])
+{
+	static int table = -2;
+	if (table == -2)
+		table = mcw::FindBlock("enchanting_table");
+	if (!g_worldLoaded || table < 0)
+		return false;
+	UTIL_MakeVectors(pl->pev->v_angle);
+	Vector eye = pl->pev->origin + pl->pev->view_ofs, fwd = gpGlobals->v_forward;
+	float best = mci::BLOCK_REACH;
+	bool found = false;
+	for (float d = 0.0f; d <= mci::BLOCK_REACH; d += 20.0f)
+	{
+		Vector p = eye + fwd * d;
+		float pf[3] = {p.x, p.y, p.z};
+		int c[3];
+		g_world.ToBlock(pf, c);
+		for (int dz = -2; dz <= 1; dz++)
+			for (int dy = -1; dy <= 1; dy++)
+				for (int dx = -1; dx <= 1; dx++)
+				{
+					int x = c[0] + dx, y = c[1] + dy, z = c[2] + dz;
+					if (!g_world.InBounds(x, y, z) || (int)mcw::CellType(g_world.Get(x, y, z)) != table)
+						continue;
+					float base = TableBaseZ(x, y, z);
+					float lo[3] = {g_world.origin[0] + x * B2U, g_world.origin[1] + y * B2U, base};
+					float hi[3] = {lo[0] + B2U, lo[1] + B2U, base + B2U * 0.75f};
+					// where the view ray enters that box
+					float t0 = 0.0f, t1 = best;
+					bool miss = false;
+					for (int a = 0; a < 3 && !miss; a++)
+					{
+						float o = eye[a], dir = fwd[a];
+						if (fabsf(dir) < 1e-6f)
+						{
+							miss = o < lo[a] || o > hi[a];
+							continue;
+						}
+						float ta = (lo[a] - o) / dir, tb = (hi[a] - o) / dir;
+						if (ta > tb)
+						{
+							float t = ta;
+							ta = tb;
+							tb = t;
+						}
+						t0 = max(t0, ta);
+						t1 = min(t1, tb);
+						miss = t0 > t1;
+					}
+					if (!miss && t0 < best)
+					{
+						best = t0;
+						out[0] = x;
+						out[1] = y;
+						out[2] = z;
+						found = true;
+					}
+				}
+	}
+	if (!found)
+		return false;
+	if (g_classicMode)
+	{
+		// not through a wall of the map
+		Vector end = eye + fwd * best;
+		float s[3] = {eye.x, eye.y, eye.z}, e[3] = {end.x, end.y, end.z}, zero[3] = {0, 0, 0};
+		mcc::Result r;
+		g_classic.Trace(s, e, zero, zero, r);
+		if (r.hit && r.fraction * best < best - 2.0f)
+			return false;
+	}
+	return true;
+}
+
 bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 {
+	{
+		int tb[3];
+		if (!(pl->pev->button & IN_DUCK) && TableInView(pl, tb))
+		{
+			EnchantOpen(pl, tb[0], tb[1], tb[2]);
+			return true;
+		}
+	}
 	int b[3], face;
 	float dist;
 	bool classicHit = false;
@@ -822,7 +1284,7 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 			Vector o = BlockCenter(b[0], b[1], b[2]) - Vector(0, 0, 20);
 			SetBlock(b[0], b[1], b[2], (g_classicMode && (c & mcc::CARVED_FLAG)) ? mcw::MakeCell(g_classic.carvedType, 0) : 0);
 			McLog("tnt: lit with flint and steel at %d %d %d", b[0], b[1], b[2]);
-			PrimeTnt(o, 80);
+			PrimeTntBy(o, 80, pl);
 			DamageHeld(pl, 1);
 			FxSwing(pl->entindex());
 			return true;
@@ -876,6 +1338,19 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 			return true;
 		}
 	}
+	if (!flint)
+		if (const char* no = PlaceRefusal(pl, p[0], p[1], p[2]))
+		{
+			static float told[MAX_CLIENTS + 1];
+			int who = pl->entindex();
+			if (who >= 1 && who <= MAX_CLIENTS && (gpGlobals->time < told[who] || gpGlobals->time - told[who] > 1.5f))
+			{
+				told[who] = gpGlobals->time;
+				Toast(pl, 1, "%s", no);
+				McLog("place: refused at %d %d %d: %s", p[0], p[1], p[2], no);
+			}
+			return true;
+		}
 	if (flint)
 	{
 		if (FireLight(p[0], p[1], p[2], pl))
@@ -955,6 +1430,8 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 			uint16_t upFlag = (g_classicMode && g_classic.IsCarved(up)) ? mcc::CARVED_FLAG : 0;
 			SetBlock(p[0], p[1], p[2], mcw::MakeCell((uint16_t)type, state) | keepFlag);
 			SetBlock(p[0], p[1], p[2] + 1, mcw::MakeCell((uint16_t)type, state | 8) | upFlag);
+			SetOwner(p[0], p[1], p[2], pl);
+			SetOwner(p[0], p[1], p[2] + 1, pl);
 		}
 		FxSound(SoundGroupBase(nd) + 2, BlockCenter(p[0], p[1], p[2]), 1.0f, 0.8f);
 		FxSwing(pl->entindex());
@@ -970,10 +1447,237 @@ bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held)
 		return true;
 	}
 	SetBlock(p[0], p[1], p[2], mcw::MakeCell((uint16_t)type, state) | keepFlag);
+	SetOwner(p[0], p[1], p[2], pl);
 	McLog("place: %s at %d %d %d", nd.name, p[0], p[1], p[2]);
+	TryBuildMob(p[0], p[1], p[2], pl);
 	FxSound(SoundGroupBase(nd) + 2, BlockCenter(p[0], p[1], p[2]), 1.0f, 0.8f);
 	FxSwing(pl->entindex());
 	ConsumeHeld(pl, 1);
+	return true;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Bots (mc_bottactics.cpp) pick the cell themselves instead of clicking on a face. The conditions are a
+// player's: the block in the hand, the cell within reach, free, not inside the classic map, nobody in it.
+
+Vector CellCenter(int x, int y, int z) { return BlockCenter(x, y, z); }
+
+bool CellTakesBlock(int x, int y, int z)
+{
+	if (!g_worldLoaded || !g_world.InBounds(x, y, z))
+		return false;
+	mcw::Cell e = g_world.Get(x, y, z);
+	bool carved = g_classicMode && g_classic.IsCarved(e);
+	if (carved && mcw::CellType(e) == g_classic.carvedType)
+		e = 0; // a dug-out cell is empty
+	if (e)
+	{
+		mcw::ShapeKind s = mcw::Block(mcw::CellType(e)).shape;
+		if (s != mcw::SHAPE_CROSS && s != mcw::SHAPE_FIRE)
+			return false;
+	}
+	if (g_classicMode && !carved)
+	{
+		Vector ctr = BlockCenter(x, y, z);
+		float cp[3] = {ctr.x, ctr.y, ctr.z};
+		if (g_classic.PointContents(cp) == mcb::CONT_SOLID)
+			return false;
+	}
+	return true;
+}
+
+static bool BotReaches(CBasePlayer* bot, int x, int y, int z)
+{
+	return (BlockCenter(x, y, z) - (bot->pev->origin + bot->pev->view_ofs)).Length() <= mci::BLOCK_REACH + B2U * 0.5f;
+}
+
+bool BotPlaceBlock(CBasePlayer* bot, int x, int y, int z)
+{
+	const mci::Stack& held = HeldStack(bot);
+	const mci::ItemDef& hd = held.Empty() ? mci::g_items[0] : mci::Item(held.id);
+	if (hd.type != mci::IT_BLOCK || !hd.blockName)
+		return false;
+	int type = mcw::FindBlock(hd.blockName);
+	if (type < 0 || mcw::Block((uint16_t)type).shape != mcw::SHAPE_CUBE)
+		return false;
+	if (!CellTakesBlock(x, y, z) || !BotReaches(bot, x, y, z) || HullBlocksPlace(x, y, z) || PlaceRefusal(bot, x, y, z))
+		return false;
+	const uint16_t keepFlag = (g_classicMode && g_classic.IsCarved(g_world.Get(x, y, z))) ? mcc::CARVED_FLAG : 0;
+	const mcw::BlockDef& nd = mcw::Block((uint16_t)type);
+	SetBlock(x, y, z, mcw::MakeCell((uint16_t)type, 0) | keepFlag);
+	SetOwner(x, y, z, bot);
+	McLog("place: bot %s sets %s at %d %d %d", STRING(bot->pev->netname), nd.name, x, y, z);
+	FxSound(SoundGroupBase(nd) + 2, BlockCenter(x, y, z), 1.0f, 0.8f);
+	FxSwing(bot->entindex());
+	ConsumeHeld(bot, 1);
+	TryBuildMob(x, y, z, bot);
+	return true;
+}
+
+// Minecraft's iron golem: a carved pumpkin set on top of four iron blocks in a T (one under it, one to either
+// side of that, one below). The blocks go, and a golem stands there for the side of whoever set the pumpkin.
+bool TryBuildMob(int x, int y, int z, CBasePlayer* pl)
+{
+	static int pumpkin = -2, iron = -2;
+	if (pumpkin == -2)
+	{
+		pumpkin = mcw::FindBlock("carved_pumpkin");
+		iron = mcw::FindBlock("iron_block");
+	}
+	static int skull = -2, soul = -2;
+	if (skull == -2)
+	{
+		skull = mcw::FindBlock("wither_skeleton_skull");
+		soul = mcw::FindBlock("soul_sand");
+	}
+	if (pl && skull >= 0 && soul >= 0 && mcw::CellType(g_world.Get(x, y, z)) == skull && (pl->m_iTeam == TERRORIST || pl->m_iTeam == CT))
+	{
+		// Minecraft's wither: four soul sand in a T, three skulls in a row on its top, the last skull set brings it
+		auto at = [&](int a, int b, int c, int type) { mcw::Cell v = g_world.Get(a, b, c); return v && mcw::CellType(v) == type; };
+		for (int ax = 0; ax < 2; ax++)
+			for (int off = -1; off <= 1; off++)
+			{
+				int m[3] = {x, y, z};
+				m[ax] -= off; // the middle skull
+				bool ok = at(m[0], m[1], m[2] - 2, soul);
+				for (int k = -1; k <= 1 && ok; k++)
+				{
+					int q[3] = {m[0], m[1], m[2]};
+					q[ax] += k;
+					ok = at(q[0], q[1], q[2], skull) && at(q[0], q[1], q[2] - 1, soul);
+				}
+				if (!ok)
+					continue;
+				if (!WitherAllowed(pl->m_iTeam))
+				{
+					Toast(pl, 1, "Your side cannot raise a wither yet");
+					McLog("mob: %s completed a wither, but its side may not have one now", STRING(pl->pev->netname));
+					return false;
+				}
+				for (int k = -1; k <= 1; k++)
+					for (int dz = 0; dz >= -2; dz--)
+					{
+						int q[3] = {m[0], m[1], m[2] + dz};
+						if (dz > -2)
+							q[ax] += k;
+						else if (k != 0)
+							continue;
+						mcw::Cell v = g_world.Get(q[0], q[1], q[2]);
+						FxParticles(mcp::PK_BLOCK_BREAK, BlockCenter(q[0], q[1], q[2]), 24, v);
+						SetBlock(q[0], q[1], q[2], (g_classicMode && (v & mcc::CARVED_FLAG)) ? mcw::MakeCell(g_classic.carvedType, 0) : 0);
+					}
+				TeamMobRequest(TM_WITHER, pl->m_iTeam, BlockCenter(m[0], m[1], m[2] - 2) - Vector(0, 0, B2U * 0.5f), pl->pev->v_angle.y, pl);
+				return true;
+			}
+		return false;
+	}
+	if (!pl || pumpkin < 0 || iron < 0 || mcw::CellType(g_world.Get(x, y, z)) != pumpkin)
+		return false;
+	auto is = [&](int a, int b, int c) { mcw::Cell v = g_world.Get(a, b, c); return v && mcw::CellType(v) == iron; };
+	if (!is(x, y, z - 1) || !is(x, y, z - 2))
+		return false;
+	int ax = (is(x - 1, y, z - 1) && is(x + 1, y, z - 1)) ? 0 : (is(x, y - 1, z - 1) && is(x, y + 1, z - 1)) ? 1 : -1;
+	if (ax < 0 || (pl->m_iTeam != TERRORIST && pl->m_iTeam != CT))
+		return false;
+	if (TeamMobsAlive(pl->m_iTeam, TM_GOLEM) >= GolemLimit())
+	{
+		Toast(pl, 1, "Your side has its iron golem already");
+		McLog("mob: %s completed a golem, but its side has %d already", STRING(pl->pev->netname), GolemLimit());
+		return false;
+	}
+	int cells[5][3] = {{x, y, z}, {x, y, z - 1}, {x, y, z - 2}, {x, y, z - 1}, {x, y, z - 1}};
+	cells[3][ax] -= 1;
+	cells[4][ax] += 1;
+	Vector feet = BlockCenter(x, y, z - 2) - Vector(0, 0, B2U * 0.5f);
+	for (const int* c : cells)
+	{
+		mcw::Cell v = g_world.Get(c[0], c[1], c[2]);
+		FxParticles(mcp::PK_BLOCK_BREAK, BlockCenter(c[0], c[1], c[2]), 24, v);
+		SetBlock(c[0], c[1], c[2], (g_classicMode && (v & mcc::CARVED_FLAG)) ? mcw::MakeCell(g_classic.carvedType, 0) : 0);
+	}
+	TeamMobRequest(TM_GOLEM, pl->m_iTeam, feet, pl->pev->v_angle.y, pl);
+	return true;
+}
+
+void ExplodeThroughAll(const float* origin, float power, CBaseEntity* attacker)
+{
+	g_blastThroughAll = true;
+	Explode(origin, power, nullptr, attacker, true);
+	g_blastThroughAll = false;
+}
+
+// A wither that was hurt breaks the blocks around itself a second later (Minecraft: a box three wide and
+// four high about it): blocks somebody set down, and what of the map can be dug. Returns how many went.
+int WitherBreaks(const Vector& origin, CBasePlayer* by)
+{
+	if (!g_worldLoaded)
+		return 0;
+	int c[3], n = 0;
+	float q[3] = {origin.x, origin.y, origin.z - 30.0f};
+	g_world.ToBlock(q, c);
+	for (int dz = 0; dz <= 3; dz++)
+		for (int dy = -1; dy <= 1; dy++)
+			for (int dx = -1; dx <= 1; dx++)
+			{
+				int x = c[0] + dx, y = c[1] + dy, z = c[2] + dz;
+				if (IsPlacedBlock(x, y, z))
+				{
+					if (mcw::Block(mcw::CellType(g_world.Get(x, y, z))).hardness < 0.0f)
+						continue;
+					BreakBlock(x, y, z, nullptr, true);
+					n++;
+				}
+				else if (g_classicMode && dz >= 1 && g_classic.Diggable(x, y, z) && !g_classic.Carved(x, y, z))
+				{
+					// (not the floor it stands on: the cells its body is in)
+					Vector ctr = BlockCenter(x, y, z);
+					float cp[3] = {ctr.x, ctr.y, ctr.z};
+					if (g_classic.PointContents(cp) != mcb::CONT_SOLID)
+						continue;
+					CarveCell(x, y, z, nullptr, false);
+					n++;
+				}
+			}
+	return n;
+}
+
+// A pressure plate from the bot's hand onto the block under the cell (the lid of a mine)
+bool BotPlacePlate(CBasePlayer* bot, int x, int y, int z)
+{
+	const mci::Stack& held = HeldStack(bot);
+	const mci::ItemDef& hd = held.Empty() ? mci::g_items[0] : mci::Item(held.id);
+	if (hd.type != mci::IT_BLOCK || !hd.blockName)
+		return false;
+	int type = mcw::FindBlock(hd.blockName);
+	if (type < 0 || mcw::Block((uint16_t)type).shape != mcw::SHAPE_PLATE)
+		return false;
+	if (!CellTakesBlock(x, y, z) || !BotReaches(bot, x, y, z) || !HasFloor(x, y, z) || PlaceRefusal(bot, x, y, z))
+		return false;
+	const uint16_t keepFlag = (g_classicMode && g_classic.IsCarved(g_world.Get(x, y, z))) ? mcc::CARVED_FLAG : 0;
+	const mcw::BlockDef& nd = mcw::Block((uint16_t)type);
+	SetBlock(x, y, z, mcw::MakeCell((uint16_t)type, 0) | keepFlag);
+	SetOwner(x, y, z, bot);
+	McLog("place: bot %s sets %s at %d %d %d", STRING(bot->pev->netname), nd.name, x, y, z);
+	FxSound(SoundGroupBase(nd) + 2, BlockCenter(x, y, z), 1.0f, 0.8f);
+	FxSwing(bot->entindex());
+	ConsumeHeld(bot, 1);
+	return true;
+}
+
+bool BotLightTnt(CBasePlayer* bot, int x, int y, int z)
+{
+	const mci::Stack& held = HeldStack(bot);
+	if (held.Empty() || mci::Item(held.id).type != mci::IT_FLINT_STEEL || !BotReaches(bot, x, y, z))
+		return false;
+	mcw::Cell c = g_world.Get(x, y, z);
+	if (!c || !(mcw::Block(mcw::CellType(c)).flags & mcw::BF_EXPLOSIVE))
+		return false;
+	Vector o = BlockCenter(x, y, z) - Vector(0, 0, 20);
+	SetBlock(x, y, z, (g_classicMode && (c & mcc::CARVED_FLAG)) ? mcw::MakeCell(g_classic.carvedType, 0) : 0);
+	McLog("tnt: bot %s lights it at %d %d %d", STRING(bot->pev->netname), x, y, z);
+	PrimeTntBy(o, 80, bot);
+	DamageHeld(bot, 1);
+	FxSwing(bot->entindex());
 	return true;
 }
 
@@ -984,6 +1688,8 @@ static float BlastResistance(const mcw::BlockDef& d)
 {
 	if (d.hardness < 0.0f)
 		return 3600000.0f;
+	if (g_blastThroughAll)
+		return 0.8f;
 	if (!strcmp(d.name, "obsidian"))
 		return 1200.0f;
 	if (d.tool == mcw::TOOL_PICKAXE && d.hardness >= 1.5f)
@@ -995,11 +1701,12 @@ static float BlastResistance(const mcw::BlockDef& d)
 	return d.hardness;
 }
 
-void Explode(const float* origin, float power, CBaseEntity* source, CBaseEntity* attacker)
+void Explode(const float* origin, float power, CBaseEntity* source, CBaseEntity* attacker, bool spareMates)
 {
+	MC_WHERE("Explode");
 	FxExplosion(origin, power);
 	if (!source)
-		ExplosionHurt(origin, power, attacker); // TNT/creeper blasts (HE/C4 already dealt Counter-Strike damage)
+		ExplosionHurt(origin, power, attacker, spareMates); // TNT/creeper blasts (HE/C4 already dealt Counter-Strike damage)
 	FxSound(mcs::MCS_EXPLODE, origin, 4.0f, (1.0f + (RANDOM_FLOAT(0, 1) - RANDOM_FLOAT(0, 1)) * 0.2f) * 0.7f);
 	if (!g_worldLoaded)
 		return;
@@ -1198,6 +1905,7 @@ void H_ExplodeBomb(IReGameHook_CGrenade_ExplodeBomb* chain, CGrenade* g, TraceRe
 
 static void VoxelPhysicsPrepass()
 {
+	MC_WHERE("VoxelPhysicsPrepass");
 	float dt = gpGlobals->frametime;
 	if (dt <= 0.0f)
 		return;

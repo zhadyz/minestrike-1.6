@@ -3,11 +3,11 @@
 #include "precompiled.h"
 
 #include "mc_server.h"
+#include "mc_enchant.h"
 #include "mc_blocks.h"
 
 namespace mc
 {
-extern void MineFrame(CBasePlayer* pl, bool holding);
 extern bool UseBlockTarget(CBasePlayer* pl, const mci::Stack& held);
 extern CBaseEntity* SpawnThrown(CBasePlayer* pl, int kind, float speed);
 extern void LaunchFirework(CBasePlayer* pl);
@@ -150,7 +150,7 @@ static void Attack(CBasePlayer* pl)
 	McPlayer& mp = P(pl);
 	const mci::Stack& held = HeldStack(pl);
 	const mci::ItemDef& def = held.Empty() ? mci::g_items[0] : mci::Item(held.id);
-	float baseDamage = held.Empty() ? 1.0f : def.attackDamage;
+	float baseDamage = (held.Empty() ? 1.0f : def.attackDamage) + EnchantMeleeBonus(held); // Sharpness
 	float speed = held.Empty() ? 4.0f : def.attackSpeed;
 
 	float cooldown = 1.0f / speed;
@@ -202,10 +202,12 @@ static void Attack(CBasePlayer* pl)
 	ClearMultiDamage();
 	TraceResult tr;
 	UTIL_TraceLine(pl->GetGunPosition(), target->Center(), dont_ignore_monsters, pl->edict(), &tr);
-	target->TraceAttack(pl->pev, dmg * mci::HP_PER_MC, dir, &tr, DMG_SLASH | DMG_NEVERGIB);
+	target->TraceAttack(pl->pev, dmg * mci::HP_PER_MC * McWeaponScale(), dir, &tr, DMG_SLASH | DMG_NEVERGIB);
 	ApplyMultiDamage(pl->pev, pl->pev);
 
-	Knockback(target, pl, knock ? 0.9f : 0.4f);
+	Knockback(target, pl, (knock ? 0.9f : 0.4f) + 0.5f * mce::Knock(held.ench)); // Knockback
+	if (mce::Fire(held.ench) && (def.type == mci::IT_SWORD || def.type == mci::IT_AXE))
+		EnchantIgnite(target, pl, 4.0f * mce::Fire(held.ench)); // Fire Aspect
 
 	if (sweep)
 	{
@@ -217,7 +219,7 @@ static void Attack(CBasePlayer* pl)
 				continue;
 			if ((other->pev->origin - pl->pev->origin).Length() > mci::ATTACK_REACH + 40.0f)
 				continue;
-			other->TakeDamage(pl->pev, pl->pev, 1.0f * mci::HP_PER_MC, DMG_SLASH);
+			other->TakeDamage(pl->pev, pl->pev, 1.0f * mci::HP_PER_MC * McWeaponScale(), DMG_SLASH);
 			Knockback(other, pl, 0.4f);
 		}
 		Vector p = pl->GetGunPosition() + gpGlobals->v_forward * 40.0f;
@@ -399,6 +401,14 @@ static void UseItem(CBasePlayer* pl, bool pressed, bool held, bool released)
 				pl->SetAnimation(PLAYER_ATTACK1);
 				if (arrow && power >= 1.0f)
 					arrow->pev->fuser1 = 1.0f; // critical arrow
+				if (arrow)
+				{
+					// Power, Flame and Punch ride on the arrow
+					const mci::Stack& bow = HeldStack(pl);
+					arrow->pev->fuser2 = (float)mce::Main(bow.ench);
+					arrow->pev->fuser3 = (float)mce::Fire(bow.ench);
+					arrow->pev->fuser4 = (float)mce::Knock(bow.ench);
+				}
 				FxSound(mcs::MCS_ARROW_SHOOT, pl->pev->origin, 1.0f, 1.0f / (RANDOM_FLOAT(0.0f, 0.4f) + 1.2f) + power * 0.5f);
 				DamageHeld(pl, 1);
 			}
@@ -449,7 +459,8 @@ void McItemFrame(CBasePlayer* pl)
 
 	if (pressed & IN_ATTACK)
 		Attack(pl);
-	MineFrame(pl, (buttons & IN_ATTACK) != 0);
+	if (!pl->IsBot()) // a bot mines the block it chose, never what its crosshair happens to be on (mc_bottactics.cpp)
+		MineFrame(pl, (buttons & IN_ATTACK) != 0);
 
 	// right mouse is +attack2 in a stock config, but HL25 configs bind it to +alt1 (IN_ALT1): both use
 	const int USE = IN_ATTACK2 | IN_ALT1;

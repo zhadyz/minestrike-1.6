@@ -91,7 +91,10 @@ void ThrowStack(CBasePlayer* pl, const mci::Stack& s, bool scatter)
 	float o[3] = {org.x, org.y, org.z}, v[3] = {vel.x, vel.y, vel.z};
 	CBaseEntity* e = SpawnItemEntity(o, s.id, s.count, v);
 	if (e)
+	{
 		SetItemDamage(e, s.damage);
+		SetItemEnchant(e, s.ench);
+	}
 }
 
 static void Changed(CBasePlayer* pl)

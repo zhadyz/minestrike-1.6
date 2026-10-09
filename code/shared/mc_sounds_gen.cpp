@@ -73,6 +73,17 @@ static const SoundVariant v_CROSSBOW_SHOOT[] = {{"mc/item/crossbow/shoot1.wav", 
 static const SoundVariant v_FLINT_USE[] = {{"mc/fire/ignite.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_FIRE_AMBIENT[] = {{"mc/fire/fire.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_PLAYER_HURT_FIRE[] = {{"mc/entity/player/hurt/fire_hurt1.wav", 1.000f, 1.000f, 1}, {"mc/entity/player/hurt/fire_hurt2.wav", 1.000f, 1.000f, 1}, {"mc/entity/player/hurt/fire_hurt3.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_ENCHANT[] = {{"mc/block/enchantment_table/enchant1.wav", 1.000f, 1.000f, 1}, {"mc/block/enchantment_table/enchant2.wav", 1.000f, 1.000f, 1}, {"mc/block/enchantment_table/enchant3.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_IRON_GOLEM_ATTACK[] = {{"mc/mob/irongolem/throw.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_IRON_GOLEM_HURT[] = {{"mc/mob/irongolem/hit1.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/hit2.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/hit3.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/hit4.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_IRON_GOLEM_DEATH[] = {{"mc/mob/irongolem/death.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_IRON_GOLEM_STEP[] = {{"mc/mob/irongolem/walk1.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/walk2.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/walk3.wav", 1.000f, 1.000f, 1}, {"mc/mob/irongolem/walk4.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_SPAWN[] = {{"mc/mob/wither/spawn.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_AMBIENT[] = {{"mc/mob/wither/idle1.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/idle2.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/idle3.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/idle4.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_SHOOT[] = {{"mc/mob/wither/shoot.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_HURT[] = {{"mc/mob/wither/hurt1.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/hurt2.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/hurt3.wav", 1.000f, 1.000f, 1}, {"mc/mob/wither/hurt4.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_DEATH[] = {{"mc/mob/wither/death.wav", 1.000f, 1.000f, 1}};
+static const SoundVariant v_WITHER_BREAK_BLOCK[] = {{"mc/mob/zombie/woodbreak.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_BREAK[] = {{"mc/dig/stone1.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone2.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone3.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone4.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_HIT[] = {{"mc/step/stone1.wav", 1.000f, 1.000f, 1}, {"mc/step/stone2.wav", 1.000f, 1.000f, 1}, {"mc/step/stone3.wav", 1.000f, 1.000f, 1}, {"mc/step/stone4.wav", 1.000f, 1.000f, 1}, {"mc/step/stone5.wav", 1.000f, 1.000f, 1}, {"mc/step/stone6.wav", 1.000f, 1.000f, 1}};
 static const SoundVariant v_STONE_PLACE[] = {{"mc/dig/stone1.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone2.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone3.wav", 1.000f, 1.000f, 1}, {"mc/dig/stone4.wav", 1.000f, 1.000f, 1}};
@@ -177,6 +188,17 @@ const SoundEvent g_sounds[MCS_COUNT] = {
 	{"item.flintandsteel.use", 1, v_FLINT_USE},
 	{"block.fire.ambient", 1, v_FIRE_AMBIENT},
 	{"entity.player.hurt_on_fire", 3, v_PLAYER_HURT_FIRE},
+	{"block.enchantment_table.use", 3, v_ENCHANT},
+	{"entity.iron_golem.attack", 1, v_IRON_GOLEM_ATTACK},
+	{"entity.iron_golem.hurt", 4, v_IRON_GOLEM_HURT},
+	{"entity.iron_golem.death", 1, v_IRON_GOLEM_DEATH},
+	{"entity.iron_golem.step", 4, v_IRON_GOLEM_STEP},
+	{"entity.wither.spawn", 1, v_WITHER_SPAWN},
+	{"entity.wither.ambient", 4, v_WITHER_AMBIENT},
+	{"entity.wither.shoot", 1, v_WITHER_SHOOT},
+	{"entity.wither.hurt", 4, v_WITHER_HURT},
+	{"entity.wither.death", 1, v_WITHER_DEATH},
+	{"entity.wither.break_block", 1, v_WITHER_BREAK_BLOCK},
 	{"block.stone.break", 4, v_STONE_BREAK},
 	{"block.stone.hit", 6, v_STONE_HIT},
 	{"block.stone.place", 4, v_STONE_PLACE},

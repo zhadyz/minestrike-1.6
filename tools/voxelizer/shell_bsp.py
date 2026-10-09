@@ -11,7 +11,9 @@ import numpy as np
 
 from bsp30 import Bsp30
 
-SDHLT_DIR = r"Z:\dev\CSminecraft\tools\sdhlt\v130\sdhlt-v1.3.0\tools\Win64"
+# SDHLT v1.3.0 (https://github.com/seedee/SDHLT/releases), unpacked under tools/sdhlt/v130; or MINESTRIKE_SDHLT
+SDHLT_DIR = os.environ.get("MINESTRIKE_SDHLT") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "sdhlt", "v130",
+                                                                "sdhlt-v1.3.0", "tools", "Win64")
 WORLD_LIMIT = 4096  # keep every brush inside +-4096 (classic GoldSrc map bounds)
 
 

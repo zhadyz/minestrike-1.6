@@ -40,13 +40,18 @@ void McLog(const char* fmt, ...)
 		if (!g_log)
 			return;
 	}
+	char line[1024];
 	va_list ap;
 	va_start(ap, fmt);
-	fprintf(g_log, "[%8.2f] ", gpGlobals ? gpGlobals->time : 0.0f);
-	vfprintf(g_log, fmt, ap);
-	fputc('\n', g_log);
-	fflush(g_log);
+	Q_vsnprintf(line, sizeof(line), fmt, ap);
 	va_end(ap);
+	fprintf(g_log, "[%8.2f] %s\n", gpGlobals ? gpGlobals->time : 0.0f, line);
+	fflush(g_log);
+	if (!strncmp(line, "SHOT ", 5))
+	{
+		extern void TestShotLogged(const char* name); // mc_test.cpp: the game takes the picture itself
+		TestShotLogged(line + 5);
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -66,6 +71,7 @@ void RegisterMessages()
 	msgInvMain = REG_USER_MSG(MCMSG_INVMAIN, -1);
 	extern void CharactersInit();
 	CharactersInit();
+	EnchantInit();
 }
 
 int MsgVox() { return msgVox; }
@@ -330,6 +336,7 @@ void SendInventory(CBasePlayer* pl)
 		WRITE_SHORT(mp.armor[i].damage);
 	}
 	MESSAGE_END();
+	SendEnchants(pl);
 	if (msgInvMain)
 	{
 		// storage, crafting grid, craft result and cursor
@@ -388,6 +395,7 @@ void SendStats(CBasePlayer* pl)
 	WRITE_BYTE(mp.food);
 	WRITE_BYTE((int)(mp.saturation + 0.5f));
 	WRITE_BYTE((int)(mp.absorption / mci::HP_PER_MC + 0.5f)); // absorption in Minecraft health points
+	WRITE_LONG(pl->m_iAccount);                               // money, for the shop screen's price tags
 	MESSAGE_END();
 	mp.statDirty = false;
 }
@@ -423,7 +431,7 @@ void DamageHeld(CBasePlayer* pl, int amount)
 		return;
 	mci::Stack& s = mp.hotbar[mp.selected];
 	const mci::ItemDef& def = mci::Item(s.id);
-	if (s.Empty() || mci::IsCsToken(s.id) || def.durability <= 0)
+	if (s.Empty() || mci::IsCsToken(s.id) || def.durability <= 0 || !EnchantWears(s, false))
 		return;
 	s.damage += amount;
 	if (s.damage >= def.durability)
@@ -458,7 +466,7 @@ void UpdatePlayerFlagsPublic(CBasePlayer* pl) { UpdatePlayerFlags(pl); }
 static void UpdatePlayerFlags(CBasePlayer* pl)
 {
 	McPlayer& mp = P(pl);
-	int f = pl->pev->iuser4 & (mcp::MCPF_TRAIN | mcp::MCPF_GLIDING | mcp::MCPF_FLYING | mcp::MCPF_SWELL_MASK);
+	int f = pl->pev->iuser4 & (mcp::MCPF_TRAIN | mcp::MCPF_GLIDING | mcp::MCPF_FLYING | mcp::MCPF_SWELL_MASK | mcp::MCPF_MOB_SWING);
 	if (!mp.armor[mci::SLOT_CHEST].Empty() && mci::Item(mp.armor[mci::SLOT_CHEST].id).type == mci::IT_ELYTRA)
 		f |= mcp::MCPF_ELYTRA;
 	else
@@ -549,7 +557,7 @@ void EquipArmor(CBasePlayer* pl, int itemId)
 	UpdatePlayerFlags(pl);
 }
 
-bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup, int damage)
+bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup, int damage, int ench)
 {
 	if (!pl || !mci::ValidItem(itemId) || count <= 0)
 		return false;
@@ -563,6 +571,8 @@ bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup
 		if (mp.armor[d.armorSlot].Empty() || mp.armor[d.armorSlot].id != itemId)
 		{
 			EquipArmor(pl, itemId);
+			mp.armor[d.armorSlot].damage = (uint16_t)damage; // a piece picked up keeps its wear and enchantments
+			mp.armor[d.armorSlot].ench = (uint16_t)ench;
 			if (announce)
 				Toast(pl, 0, "Gave 1 [%s] to %s", d.display, STRING(pl->pev->netname));
 			return true;
@@ -612,6 +622,7 @@ bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup
 			s.id = (uint16_t)itemId;
 			s.count = (uint8_t)n;
 			s.damage = (uint16_t)damage;
+			s.ench = (uint16_t)ench;
 			left -= n;
 			if (firstPlaced < 0 && slotIndex[i] >= 0)
 				firstPlaced = slotIndex[i];
@@ -735,13 +746,23 @@ static bool ItemInCategory(const mci::ItemDef& d, int cat)
 
 void ShowMenuText(CBasePlayer* pl, int keys, const char* text)
 {
-	// ShowMenu supports chunking for long strings; ours fit in one chunk.
-	MESSAGE_BEGIN(MSG_ONE, gmsgShowMenu, nullptr, pl->edict());
-	WRITE_SHORT(keys);
-	WRITE_CHAR(-1);
-	WRITE_BYTE(0);
-	WRITE_STRING(text);
-	MESSAGE_END();
+	// A user message holds 192 bytes at most: long menus go out in pieces, each but the last flagged
+	// "more to come" (the client joins them).
+	const int kChunk = 170;
+	int len = (int)strlen(text);
+	for (int at = 0; at == 0 || at < len; at += kChunk)
+	{
+		char piece[kChunk + 1];
+		int n = min(kChunk, len - at);
+		memcpy(piece, text + at, n);
+		piece[n] = 0;
+		MESSAGE_BEGIN(MSG_ONE, gmsgShowMenu, nullptr, pl->edict());
+		WRITE_SHORT(keys);
+		WRITE_CHAR(-1);
+		WRITE_BYTE(at + kChunk < len ? 1 : 0);
+		WRITE_STRING(piece);
+		MESSAGE_END();
+	}
 }
 
 void OpenMenu(CBasePlayer* pl, int menu, int page)
@@ -805,32 +826,27 @@ void OpenMenu(CBasePlayer* pl, int menu, int page)
 	ShowMenuText(pl, keys, buf);
 }
 
-static void GiveKit(CBasePlayer* pl, int kit)
+// A kit is bought as a whole at the sum of its items' prices (free: the test autokit, creative mode)
+static void GiveKit(CBasePlayer* pl, int kit, bool free = false)
 {
-	auto give = [&](const char* n, int c) { GiveItem(pl, mci::FindItem(n), c, false); };
-	switch (kit)
+	struct KitDef
 	{
-	case 0:
-		give("diamond_sword", 1); give("diamond_axe", 1);
-		give("diamond_helmet", 1); give("diamond_chestplate", 1); give("diamond_leggings", 1); give("diamond_boots", 1);
-		Toast(pl, 0, "Equipped the \\aqFull Diamond\\w kit");
-		break;
-	case 1:
-		give("netherite_sword", 1); give("mace", 1);
-		give("netherite_helmet", 1); give("netherite_chestplate", 1); give("netherite_leggings", 1); give("netherite_boots", 1);
-		Toast(pl, 0, "Equipped the Netherite kit");
-		break;
-	case 2:
-		give("elytra", 1); give("firework_rocket", 64);
-		Toast(pl, 0, "Equipped Elytra. Jump while falling to glide, right-click rockets to boost!");
-		break;
-	case 3:
-		give("diamond_pickaxe", 1); give("diamond_shovel", 1); give("tnt", 16); give("cobblestone", 64);
-		break;
-	case 4:
-		give("totem_of_undying", 1); give("golden_apple", 16);
-		break;
-	}
+		const char* name;
+		const char* items[6];
+		int counts[6];
+		int num;
+	};
+	static const KitDef kits[5] = {
+		{"Full Diamond", {"diamond_sword", "diamond_axe", "diamond_helmet", "diamond_chestplate", "diamond_leggings", "diamond_boots"}, {1, 1, 1, 1, 1, 1}, 6},
+		{"Netherite", {"netherite_sword", "mace", "netherite_helmet", "netherite_chestplate", "netherite_leggings", "netherite_boots"}, {1, 1, 1, 1, 1, 1}, 6},
+		{"Elytra", {"elytra", "firework_rocket"}, {1, 64}, 2},
+		{"Miner", {"diamond_pickaxe", "diamond_shovel", "tnt", "cobblestone"}, {1, 1, 1, 8}, 4},
+		{"Totem", {"totem_of_undying", "golden_apple"}, {1, 16}, 2},
+	};
+	if (kit < 0 || kit > 4)
+		return;
+	if (BuyKit(pl, kits[kit].items, kits[kit].counts, kits[kit].num, kits[kit].name, free) && kit == 2)
+		Toast(pl, 0, "Jump while falling to glide, right-click rockets to boost!");
 }
 
 static void HandleMenuSelect(CBasePlayer* pl, int key)
@@ -842,6 +858,8 @@ static void HandleMenuSelect(CBasePlayer* pl, int key)
 		return; // closed
 	extern bool CharacterMenuSelect(CBasePlayer * pl, int menu, int key);
 	if (CharacterMenuSelect(pl, menu, key))
+		return;
+	if (EnchantMenuSelect(pl, menu, key))
 		return;
 	if (menu == 1)
 	{
@@ -883,7 +901,7 @@ static void HandleMenuSelect(CBasePlayer* pl, int key)
 		if (idx >= 0 && idx < n)
 		{
 			const mci::ItemDef& d = mci::Item(ids[idx]);
-			GiveItem(pl, ids[idx], d.maxStack > 1 ? d.maxStack : 1, true);
+			BuyItem(pl, ids[idx], d.maxStack > 1 ? d.maxStack : 1, true);
 		}
 		OpenMenu(pl, menu, mp.menuPage); // keep it open, Minecraft creative-style
 	}
@@ -914,7 +932,7 @@ static void ChatCommand(CBasePlayer* pl, const char* text)
 			return;
 		}
 		int count = argc > a + 1 ? atoi(argv[a + 1]) : 1;
-		GiveItem(pl, id, clamp(count, 1, 64 * 4), true);
+		BuyItem(pl, id, clamp(count, 1, 64 * 4), true);
 	}
 	else if (!Q_stricmp(c, "gamemode") && argc >= 2)
 	{
@@ -989,7 +1007,7 @@ bool ClientCommand(CBasePlayer* pl, const char* cmd, const char* args)
 	{
 		int id = mci::FindItem(CMD_ARGV(1));
 		if (id > 0)
-			GiveItem(pl, id, CMD_ARGC() > 2 ? atoi(CMD_ARGV(2)) : 1, true);
+			BuyItem(pl, id, CMD_ARGC() > 2 ? atoi(CMD_ARGV(2)) : 1, true);
 		return true;
 	}
 	// creative inventory screen (client mc_gui.cpp)
@@ -997,12 +1015,19 @@ bool ClientCommand(CBasePlayer* pl, const char* cmd, const char* args)
 	{
 		int id = mci::FindItem(CMD_ARGV(1));
 		if (id > 0 && pl->IsAlive())
-			GiveItem(pl, id, clamp(CMD_ARGC() > 2 ? atoi(CMD_ARGV(2)) : 1, 1, 64), false);
+			BuyItem(pl, id, clamp(CMD_ARGC() > 2 ? atoi(CMD_ARGV(2)) : 1, 1, 64), false);
 		return true;
 	}
 	if (!Q_strcmp(cmd, "mc_setslot"))
 	{
 		int slot = atoi(CMD_ARGV(1)) - 1;
+		if (EconomyOn(pl) && mci::FindItem(CMD_ARGV(2)) > 0)
+		{
+			// paying players buy into the inventory; only creative mode writes a slot directly
+			int id = mci::FindItem(CMD_ARGV(2));
+			BuyItem(pl, id, clamp(CMD_ARGC() > 3 ? atoi(CMD_ARGV(3)) : 1, 1, 64), false);
+			return true;
+		}
 		if (slot >= 0 && slot < mcp::HOTBAR_SIZE && pl->IsAlive() && !mci::IsCsToken(mp.hotbar[slot].id))
 		{
 			int id = mci::FindItem(CMD_ARGV(2));
@@ -1040,6 +1065,10 @@ bool ClientCommand(CBasePlayer* pl, const char* cmd, const char* args)
 		OpenMenu(pl, 1);
 		return true;
 	}
+	if (!Q_strncmp(cmd, "mc_ench_", 8))
+		return EnchantCommand(pl, cmd);
+	if (!Q_strcmp(cmd, "mc_brain"))
+		return BotTacticsCommand(pl, cmd);
 	if (!Q_strcmp(cmd, "mc_click"))
 	{
 		InventoryClick(pl, atoi(CMD_ARGV(1)), atoi(CMD_ARGV(2)), atoi(CMD_ARGV(3)) != 0);
@@ -1134,7 +1163,7 @@ static void H_Spawn(IReGameHook_CBasePlayer_Spawn* chain, CBasePlayer* pl)
 		{
 			kitted[pl->entindex()] = true;
 			McLog("autokit for %s", STRING(pl->pev->netname));
-			GiveKit(pl, 0);
+			GiveKit(pl, 0, true);
 			GiveItem(pl, mci::FindItem("firework_rocket"), 64, false);
 			GiveItem(pl, mci::FindItem("cobblestone"), 64, false);
 			GiveItem(pl, mci::FindItem("diamond_pickaxe"), 1, false);
@@ -1146,11 +1175,13 @@ static void H_Spawn(IReGameHook_CBasePlayer_Spawn* chain, CBasePlayer* pl)
 		}
 	}
 	// bots: some rounds they spend their money on Minecraft gear (mc_botgear.cpp)
-	if (pl->IsBot() && pl->IsAlive() && cv_botArmor.value != 0.0f)
+	if (pl->IsBot() && pl->IsAlive() && cv_botArmor.value != 0.0f && !IsMobBot(pl))
 	{
 		extern void BotGearSpawn(CBasePlayer * bot);
 		BotGearSpawn(pl);
 	}
+	if (pl->IsBot() && pl->IsAlive() && !IsMobBot(pl))
+		BotTacticsSpawn(pl); // blocks, TNT and a flint and steel for some (mc_bottactics.cpp)
 	if (false)
 	{
 		for (int i = 0; i < mci::NUM_ARMOR_SLOTS; i++)
@@ -1176,6 +1207,7 @@ static void H_Spawn(IReGameHook_CBasePlayer_Spawn* chain, CBasePlayer* pl)
 		}
 	}
 	CreeperSpawn(pl);
+	TeamMobSpawned(pl);
 	extern void CharacterSpawn(CBasePlayer * pl);
 	CharacterSpawn(pl);
 	UpdatePlayerFlags(pl);
@@ -1183,7 +1215,7 @@ static void H_Spawn(IReGameHook_CBasePlayer_Spawn* chain, CBasePlayer* pl)
 
 static bool H_HasRestrictItem(IReGameHook_CBasePlayer_HasRestrictItem* chain, CBasePlayer* pl, ItemID item, ItemRestType type)
 {
-	if (CreeperRestrictsItem(pl, item))
+	if (CreeperRestrictsItem(pl, item) || (IsMobBot(pl) && item != ITEM_KNIFE))
 		return true;
 	return chain->callNext(pl, item, type);
 }
@@ -1227,6 +1259,8 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 	if (att && att->IsPlayer() && IsCreeper((CBasePlayer*)att) && !(bits & DMG_BLAST))
 		return FALSE;
 	CBaseEntity* infl = inflictor ? CBaseEntity::Instance(inflictor) : nullptr;
+	if (TeamMobDamage(pl, infl, att, damage, bits))
+		return FALSE;
 	if (EndermanDodge(pl, infl, att, bits))
 		return FALSE;
 	mp.lastInflictor = infl ? infl->entindex() : 0;
@@ -1241,7 +1275,10 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 		else if (infl == att && P(ap).mcItemActive && damage >= 18.0f * mci::HP_PER_MC)
 			Award(ap, ADV_OVERKILL); // nine hearts in a single hit
 	}
-	if (pl->IsAlive() && damage > 0.0f && !(bits & DMG_FALL))
+	// Minecraft armor stops bullets (and Counter-Strike's knife, which the game counts as one). Swords, axes,
+	// arrows, explosions and fire go through it: Minecraft weapons are the answer to an armored opponent.
+	bool bullet = (bits & DMG_BULLET) && !(infl && FClassnameIs(infl->pev, "mc_projectile"));
+	if (pl->IsAlive() && damage > 0.0f && bullet)
 	{
 		float reduction = ArmorReduction(pl);
 		if (reduction > 0.0f)
@@ -1268,7 +1305,7 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 				{
 					mci::Stack& s = mp.armor[i];
 					const mci::ItemDef& d = mci::Item(s.id);
-					if (s.Empty() || d.type != mci::IT_ARMOR || d.durability <= 0)
+					if (s.Empty() || d.type != mci::IT_ARMOR || d.durability <= 0 || !EnchantWears(s, true))
 						continue;
 					s.damage += wear;
 					if (s.damage >= d.durability)
@@ -1282,6 +1319,10 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 			}
 		}
 	}
+
+	// Protection on the armor worn takes its share off any damage: blades and fire too (4% a level)
+	if (pl->IsAlive() && damage > 0.0f)
+		damage *= 1.0f - EnchantProtection(pl);
 
 	// damage exhausts (Minecraft: 0.1 per hit); absorption hearts soak damage before health
 	if (pl->IsAlive() && damage > 0.0f && !pl->IsBot())
@@ -1319,7 +1360,14 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 		}
 	}
 
+	// a player fighting with a Minecraft weapon keeps a steady aim when hit
+	Vector punch = pl->pev->punchangle;
+	bool steady = HoldsMcWeapon(pl);
 	BOOL r = chain->callNext(pl, inflictor, attacker, damage, bits);
+	if (steady)
+		pl->pev->punchangle = punch;
+	if (HoldsMcMelee(pl))
+		pl->m_flVelocityModifier = 1.0f; // and a blade in hand is not slowed by bullets
 	if (r && damage > 0.0f)
 	{
 		FxHurt(pl->entindex());
@@ -1330,12 +1378,46 @@ static BOOL H_TakeDamage(IReGameHook_CBasePlayer_TakeDamage* chain, CBasePlayer*
 	return r;
 }
 
+// Counter-Strike kicks the view of a player who is hit (TraceAttack). Not while a Minecraft weapon is held.
+static void H_TraceAttack(IReGameHook_CBasePlayer_TraceAttack* chain, CBasePlayer* pl, entvars_t* attacker, float damage, Vector& dir,
+	TraceResult* tr, int bits)
+{
+	Vector punch = pl->pev->punchangle;
+	bool steady = HoldsMcWeapon(pl);
+	if (TeamMobBullet(pl, attacker, damage, tr, bits))
+		return; // (an iron golem: the bullet does nothing to it, and comes back)
+	if (tr && IsMobBot(pl))
+		tr->iHitgroup = HITGROUP_CHEST; // (a mob has no soft spot: a blow at its head is a blow at its body)
+	chain->callNext(pl, attacker, damage, dir, tr, bits);
+	if (steady)
+		pl->pev->punchangle = punch;
+}
+
+// the shop screen shows the player's money: resend the stats when it changes
+static void H_AddAccount(IReGameHook_CBasePlayer_AddAccount* chain, CBasePlayer* pl, int amount, RewardType type, bool track)
+{
+	chain->callNext(pl, amount, type, track);
+	P(pl).statDirty = true;
+}
+
 static void H_Killed(IReGameHook_CBasePlayer_Killed* chain, CBasePlayer* pl, entvars_t* attacker, int gib)
 {
 	Vector org = pl->pev->origin;
+	// (whatever the damage came from, Counter-Strike must have a blast vector it can divide by)
+	if (pl->m_vBlastVector.Length() < 1.0f)
+		pl->m_vBlastVector = Vector(0, 0, 1);
 	chain->callNext(pl, attacker, gib);
+	if (!isfinite(pl->pev->velocity.x) || !isfinite(pl->pev->velocity.y) || !isfinite(pl->pev->velocity.z))
+	{
+		McLog("%s died with a velocity that is not a number; stopped", STRING(pl->pev->netname));
+		pl->pev->velocity = g_vecZero;
+	}
 	McPlayer& mp = P(pl);
 	mp.deathTime = gpGlobals->time;
+	{
+		CBaseEntity* k = attacker ? CBaseEntity::Instance(attacker) : nullptr;
+		mp.killer = (k && k->IsPlayer() && k != pl) ? k->entindex() : 0;
+	}
 	mp.foodReset = true;
 	mp.deathEffectsDone = false;
 	mp.mineProgress = 0.0f;
@@ -1454,6 +1536,7 @@ static int RemoveMcEntities() { return CountOrRemoveMcEntities(true); }
 
 static void H_RestartRound(IReGameHook_CSGameRules_RestartRound* chain)
 {
+	TeamMobsRemove(); // (whatever mob is still about: it does not start the next round)
 	chain->callNext();
 	// The "Game Commencing" restart re-sends InitHUD to everyone, which drops a team menu the client had
 	// queued behind the MOTD: offer it again to whoever is still choosing a team.
@@ -1479,11 +1562,15 @@ static void H_RestartRound(IReGameHook_CSGameRules_RestartRound* chain)
 	int removed = RemoveMcEntities();
 	if (removed)
 		McLog("round restart: removed %d Minecraft entities", removed);
+	BotTacticsRoundRestart();
 }
 
 static void H_PM_Move(IReGameHook_PM_Move* chain, struct playermove_s* ppmove, int server)
 {
+	MC_WHERE("PM_Move");
 	mcm::InstallTraceWrappers(ppmove);
+	if (server)
+		BotControlMove(ppmove);
 	if (mcm::PreMove(ppmove))
 		return;
 	chain->callNext(ppmove, server);
@@ -1492,7 +1579,19 @@ static void H_PM_Move(IReGameHook_PM_Move* chain, struct playermove_s* ppmove, i
 static void H_PreThink(IReGameHook_CBasePlayer_PreThink* chain, CBasePlayer* pl)
 {
 	chain->callNext(pl);
+	MC_WHERE("PreThink");
 	McPlayer& mp = P(pl);
+	{
+		// a sword, an axe or the mace in hand: 5% on top of the speed Counter-Strike allows right now
+		bool melee = pl->IsAlive() && HoldsMcMelee(pl);
+		if (melee || mp.meleeSpeed)
+		{
+			pl->ResetMaxSpeed();
+			if (melee && pl->pev->maxspeed > 1.0f)
+				pl->pev->maxspeed *= 1.05f;
+			mp.meleeSpeed = melee;
+		}
+	}
 	if (pl->IsBot())
 	{
 		bool active = pl->m_pActiveItem && pl->m_pActiveItem->m_iId == WEAPON_GLOCK;
@@ -1502,6 +1601,10 @@ static void H_PreThink(IReGameHook_CBasePlayer_PreThink* chain, CBasePlayer* pl)
 			UpdatePlayerFlags(pl);
 		}
 		extern void BotGearThink(CBasePlayer * bot);
+		if (TeamMobPreThink(pl))
+			return; // (a mob: no blocks, no gear)
+		BotTacticsThink(pl);
+		MC_WHERE("BotGearThink");
 		BotGearThink(pl);
 		return;
 	}
@@ -1558,6 +1661,8 @@ void OnGiveFnptrs()
 	InstallMsgTrace();
 	extern void BotGearInit();
 	BotGearInit();
+	BotTacticsInit();
+	TeamMobsInit();
 	// register before the command line (+mc_autojoin 1 ...) is executed
 	CVAR_REGISTER(&cv_buyInv);
 	CVAR_REGISTER(&cv_xpPerKill);
@@ -1571,12 +1676,15 @@ void OnGiveFnptrs()
 	RegisterTestCvars();
 	HitRigsInit();
 	FireInit();
+	EconomyInit();
 	InstallEngineTraceWrappers();
 	mcw::InitBlockRegistry();
 	g_ReGameHookchains.m_InternalCommand.registerHook(&H_InternalCommand, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_Spawn.registerHook(&H_Spawn, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_HasRestrictItem.registerHook(&H_HasRestrictItem, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_TakeDamage.registerHook(&H_TakeDamage, HC_PRIORITY_DEFAULT);
+	g_ReGameHookchains.m_CBasePlayer_TraceAttack.registerHook(&H_TraceAttack, HC_PRIORITY_DEFAULT);
+	g_ReGameHookchains.m_CBasePlayer_AddAccount.registerHook(&H_AddAccount, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_Killed.registerHook(&H_Killed, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_DeathSound.registerHook(&H_DeathSound, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CBasePlayer_Pain.registerHook(&H_Pain, HC_PRIORITY_DEFAULT);
@@ -1587,6 +1695,7 @@ void OnGiveFnptrs()
 	g_ReGameHookchains.m_CBasePlayer_PostThink.registerHook(&H_PostThink, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CGrenade_ExplodeHeGrenade.registerHook(&H_ExplodeHe, HC_PRIORITY_DEFAULT);
 	g_ReGameHookchains.m_CGrenade_ExplodeBomb.registerHook(&H_ExplodeBomb, HC_PRIORITY_DEFAULT);
+	g_ReGameHookchains.m_IsPenetrableEntity.registerHook(&H_IsPenetrable, HC_PRIORITY_DEFAULT);
 }
 
 
@@ -1653,6 +1762,7 @@ void OnClientPutInServer(edict_t* ent)
 
 void OnClientDisconnect(edict_t* ent)
 {
+	TeamMobDisconnect(ENTINDEX(ent));
 	McPlayer& mp = P(ENTINDEX(ent));
 	const char* name = STRING(ent->v.netname);
 	if (mp.active && name && name[0] && !(ent->v.flags & FL_FAKECLIENT))
@@ -1683,8 +1793,96 @@ void OnUpdateClientData(const edict_t* ent, struct clientdata_s* cd)
 
 extern void WorldStartFrame();
 
+// Test runs: a thread that notices when the server stops finishing frames, and says where it was.
+const char* volatile g_mcWhere = "outside the mod";
+static volatile unsigned g_frames = 0;
+static DWORD WINAPI Watchdog(LPVOID)
+{
+	unsigned last = 0;
+	int still = 0;
+	for (;;)
+	{
+		Sleep(1000);
+		unsigned n = g_frames;
+		if (n != last || n == 0)
+		{
+			last = n;
+			still = 0;
+			continue;
+		}
+		if (++still == 3)
+		{
+			char path[512], gd[256];
+			GET_GAME_DIR(gd);
+			Q_snprintf(path, sizeof(path), "%s/logs/mc_watchdog.log", gd);
+			if (FILE* f = fopen(path, "a"))
+			{
+				fprintf(f, "no frame finished for 3 s after frame %u (game time %.2f): in \"%s\"\n", n, gpGlobals ? gpGlobals->time : 0.0f, g_mcWhere);
+				fclose(f);
+			}
+		}
+	}
+}
+
+// ... and what a crash leaves behind: the faulting address and the return addresses on the stack that lie in
+// this DLL, as offsets to look up in mp.map.
+static LONG CALLBACK CrashNote(EXCEPTION_POINTERS* x)
+{
+	DWORD code = x->ExceptionRecord->ExceptionCode;
+	static int notes = 0;
+	if ((code != EXCEPTION_ACCESS_VIOLATION && code != EXCEPTION_STACK_OVERFLOW && code != EXCEPTION_ILLEGAL_INSTRUCTION &&
+			code != EXCEPTION_INT_DIVIDE_BY_ZERO && code != EXCEPTION_PRIV_INSTRUCTION) ||
+		notes >= 4)
+		return EXCEPTION_CONTINUE_SEARCH;
+	notes++;
+	HMODULE self = nullptr;
+	GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)&CrashNote, &self);
+	HMODULE at = nullptr;
+	char module[MAX_PATH] = "?";
+	if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)x->ExceptionRecord->ExceptionAddress, &at))
+		GetModuleFileNameA(at, module, sizeof(module));
+	char path[512], gd[256];
+	GET_GAME_DIR(gd);
+	Q_snprintf(path, sizeof(path), "%s/logs/mc_watchdog.log", gd);
+	FILE* f = fopen(path, "a");
+	if (!f)
+		return EXCEPTION_CONTINUE_SEARCH;
+	fprintf(f, "exception %08lx at %p (%s +%lx), game time %.2f, in \"%s\"\n", code, x->ExceptionRecord->ExceptionAddress, module,
+		(unsigned long)((char*)x->ExceptionRecord->ExceptionAddress - (char*)at), gpGlobals ? gpGlobals->time : 0.0f, g_mcWhere);
+	if (code == EXCEPTION_ACCESS_VIOLATION && x->ExceptionRecord->NumberParameters >= 2)
+		fprintf(f, "  %s address %p\n", x->ExceptionRecord->ExceptionInformation[0] ? "writing" : "reading", (void*)x->ExceptionRecord->ExceptionInformation[1]);
+	// the stack: every word that points into this DLL's code is (very likely) a return address
+	MEMORY_BASIC_INFORMATION mbi;
+	const DWORD* sp = (const DWORD*)x->ContextRecord->Esp;
+	if (self && code != EXCEPTION_STACK_OVERFLOW && VirtualQuery(sp, &mbi, sizeof(mbi)))
+	{
+		const DWORD* end = (const DWORD*)((char*)mbi.BaseAddress + mbi.RegionSize);
+		const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)((char*)self + ((const IMAGE_DOS_HEADER*)self)->e_lfanew);
+		DWORD lo = (DWORD)self, hi = lo + nt->OptionalHeader.SizeOfImage;
+		fprintf(f, "  mp.dll offsets on the stack:");
+		for (int n = 0; sp < end && n < 40; sp++)
+			if (*sp >= lo && *sp < hi)
+			{
+				fprintf(f, " %lx", (unsigned long)(*sp - lo));
+				n++;
+			}
+		fprintf(f, "\n");
+	}
+	fclose(f);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
 void StartFrame()
 {
+	g_frames++;
+	static bool watching = false;
+	if (!watching && CVAR_GET_STRING("mc_testscript")[0])
+	{
+		watching = true;
+		CreateThread(nullptr, 0, Watchdog, nullptr, 0, nullptr);
+		AddVectoredExceptionHandler(1, CrashNote);
+	}
+	MC_WHERE("StartFrame");
 	static float nextBeat = 0.0f;
 	if (gpGlobals->time >= nextBeat)
 	{
@@ -1693,12 +1891,34 @@ void StartFrame()
 		McLog("beat: time %.1f autojoin %.0f quota %.0f p1 %s team %d join %d alive %d", gpGlobals->time, cv_autojoin.value, CVAR_GET_FLOAT("bot_quota"),
 			h ? STRING(h->pev->netname) : "-", h ? (int)h->m_iTeam : -1, h ? (int)h->m_iJoiningState : -1, h ? (int)h->IsAlive() : -1);
 	}
-	WorldStartFrame();
+	{
+		MC_WHERE("WorldStartFrame");
+		WorldStartFrame();
+	}
 	extern void TestFrame();
-	TestFrame();
-	CreeperFrame();
-	FireFrame();
-	HitRigsFrame();
+	{
+		MC_WHERE("TestFrame");
+		TestFrame();
+	}
+	{
+		MC_WHERE("CreeperFrame");
+		CreeperFrame();
+		MC_WHERE("TeamMobFrame");
+		TeamMobFrame();
+	}
+	{
+		MC_WHERE("FireFrame");
+		FireFrame();
+	}
+	{
+		MC_WHERE("BotTacticsFrame");
+		BotTacticsFrame();
+	}
+	{
+		MC_WHERE("HitRigsFrame");
+		HitRigsFrame();
+	}
+	MC_WHERE("StartFrame: the rest");
 	ShowPendingTeamMenus();
 	// Minecraft death: the body vanishes in a puff after a moment and drops its XP.
 	for (int i = 1; i <= gpGlobals->maxClients; i++)
@@ -1733,7 +1953,12 @@ void StartFrame()
 			int xp = (int)CVAR_GET_FLOAT("mc_xp_per_kill");
 			if (mp.xpLevel > 0)
 				xp = max(xp, min(mp.xpLevel * 7, 100)); // Minecraft player XP drop
-			DropXp(org + Vector(0, 0, 8), xp + RANDOM_LONG(0, 6));
+			// a bot does not go round collecting orbs: its kill pays it the experience directly
+			CBasePlayer* killer = mp.killer > 0 ? UTIL_PlayerByIndex(mp.killer) : nullptr;
+			if (killer && killer->IsBot() && killer->IsAlive())
+				GiveXp(killer, xp + RANDOM_LONG(0, 6));
+			else
+				DropXp(org + Vector(0, 0, 8), xp + RANDOM_LONG(0, 6));
 			pl->pev->effects |= EF_NODRAW; // corpse disappears like a Minecraft mob
 		}
 	}

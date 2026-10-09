@@ -24,9 +24,14 @@ struct ClientState
 	int craftId[4] = {}, craftCount[4] = {}, craftDamage[4] = {};
 	int craftResId = 0, craftResCount = 0;
 	int cursorId = 0, cursorCount = 0, cursorDamage = 0;
+	// from MCMSG_ENCHUI: the enchanting screen (the item's slot, and per offer the level asked and the one enchantment shown)
+	int enchSlot = 0, enchLevel[3] = {}, enchClueKind[3] = {}, enchClueLevel[3] = {};
+	unsigned enchSeed = 0;
+	int ench[48] = {}; // from MCMSG_ENCH: enchantments by inventory-screen slot (5-8 armor, 9-35 storage, 36-44 hotbar, 45 cursor)
 	// from MCMSG_STAT
 	int xpLevel = 0, xpInto = 0, xpNeed = 7, armorPoints = 0;
 	int food = 20, saturation = 5, absorption = 0; // hunger bar, absorption hearts (Minecraft health points)
+	int money = 0;                                 // Counter-Strike dollars (the shop screen)
 	// from prediction (local player)
 	int flags = 0;           // MCPF_*
 	float boost = 0.0f;

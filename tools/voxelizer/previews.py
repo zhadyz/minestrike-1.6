@@ -6,7 +6,10 @@ import os
 import numpy as np
 from PIL import Image, ImageDraw
 
-TEXDIR = r"Z:\dev\CSminecraft\assets\mc\jar\assets\minecraft\textures\block"
+_ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+TEXDIR = os.path.join(_ROOT, "assets", "mc", "jar", "assets", "minecraft", "textures", "block")
+if not os.path.isdir(TEXDIR):  # (an installed copy has the textures in the game folder only)
+    TEXDIR = os.path.join(os.environ.get("MINESTRIKE_GAME") or os.path.join(_ROOT, "game", "Half-Life"), "cstrike", "mc", "textures", "block")
 
 
 class TexCache:

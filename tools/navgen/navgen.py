@@ -57,7 +57,8 @@ sys.path.insert(0, HERE)
 from mcw_io import read_mcw  # noqa: E402
 
 DEFAULT_MAPS = os.path.join(PROJECT, "game", "Half-Life", "cstrike", "maps")
-DEFAULT_SCRATCH = r"Z:\dev\scratch\csminecraft\navgen"
+DEFAULT_SCRATCH = os.path.join(os.environ.get("MINESTRIKE_SCRATCH") or (r"Z:\dev\scratch\csminecraft" if os.path.isdir(r"Z:\dev\scratch\csminecraft")
+                                                                        else os.path.join(PROJECT, "work")), "navgen")
 BLOCKS_CPP = os.path.join(PROJECT, "code", "shared", "mc_blocks.cpp")
 
 # ---- game_shared/bot/nav.h -------------------------------------------------------------------------

@@ -113,7 +113,7 @@ static const char* PickSkin(int index)
 		const char* name;
 		const char* skin;
 	};
-	static const Map byName[] = {{"Creeper", "entity/creeper/creeper"}, {"Enderman", "entity/enderman/enderman"}, {"Zombie", "entity/zombie/zombie"}, {"Husk", "entity/zombie/husk"}, {"Drowned", "entity/zombie/drowned"},
+	static const Map byName[] = {{"Iron Golem", "entity/iron_golem/iron_golem"}, {"Creeper", "entity/creeper/creeper"}, {"Enderman", "entity/enderman/enderman"}, {"Zombie", "entity/zombie/zombie"}, {"Husk", "entity/zombie/husk"}, {"Drowned", "entity/zombie/drowned"},
 		{"Steve", "entity/player/wide/steve"},
 		{"Alex", "entity/player/slim/alex"}, {"Herobrine", "entity/player/wide/steve"}, {"Notch", "entity/player/wide/steve"}};
 	for (auto& m : byName)
@@ -455,6 +455,8 @@ static void DrawPlayer(cl_entity_t* e)
 		return;
 	bool legacy = st.h == 32 || strstr(skin, "skeleton") != nullptr;
 	bool creeper = strstr(skin, "creeper") != nullptr;
+	bool golem = strstr(skin, "iron_golem") != nullptr;
+	bool wither = strstr(skin, "entity/wither/") != nullptr;
 	bool enderman = strstr(skin, "enderman") != nullptr;
 	bool zombie = strstr(skin, "zombie") != nullptr;
 
@@ -861,6 +863,84 @@ static void DrawPlayer(cl_entity_t* e)
 			drawHeld(limbs[0], 27.0f, 0); // the hand at the end of a 30 px arm
 		if (dual)
 			drawHeld(limbs[1], 27.0f, 1);
+		glPopMatrix();
+		return;
+	}
+	if (wither)
+	{
+		// WitherBossModel (64x64) at twice its size, as Minecraft draws it: the middle head, the shoulders, a
+		// spine with three ribs, a tail, a smaller head to either side. It hangs a little above the ground and
+		// bobs. Rising (the fuse bits count down) it is smaller, and blue-white.
+		float rising = mcp::SwellOf(e->curstate.iuser4) / 30.0f;
+		mctex::Bind(rising > 0.0f ? "entity/wither/wither_invulnerable" : skin);
+		float sc = 2.0f - rising * 0.5f, t = (float)g_cl.time;
+		glTranslatef(0, 24.0f - 3.0f - sinf(t * 2.0f) * 1.2f, 0);
+		glScalef(sc, sc, sc);
+		glTranslatef(0, -24.0f, 0);
+		float hx = pitch * PI / 180.0f;
+		Part wh = {0, 0, 0, hx, 0, 0};
+		PushPart(wh);
+		Cube(-4, -4, -4, 8, 8, 8, 0, 0, 0, 64, 64, false);
+		glPopMatrix();
+		Part ws = {0, 0, 0, 0, 0, 0};
+		PushPart(ws);
+		Cube(-10, 3.9f, -0.5f, 20, 3, 3, 0, 16, 0, 64, 64, false);
+		glPopMatrix();
+		float sway = cosf(t * 2.0f);
+		Part wr = {-2, 6.9f, -0.5f, 0.2042f + sway * 0.05f, 0, 0};
+		PushPart(wr);
+		Cube(0, 0, 0, 3, 10, 3, 0, 22, 0, 64, 64, false);
+		Cube(-4, 1.5f, 0.5f, 11, 2, 2, 24, 22, 0, 64, 64, false);
+		Cube(-4, 4, 0.5f, 11, 2, 2, 24, 22, 0, 64, 64, false);
+		Cube(-4, 6.5f, 0.5f, 11, 2, 2, 24, 22, 0, 64, 64, false);
+		glPopMatrix();
+		Part wt = {-2, 6.9f + cosf(0.2042f) * 10.0f, -0.5f + sinf(0.2042f) * 10.0f, 0.8325f + sway * 0.1f, 0, 0};
+		PushPart(wt);
+		Cube(0, 0, 0, 3, 6, 3, 12, 22, 0, 64, 64, false);
+		glPopMatrix();
+		Part wrh = {-8, 4, 0, hx, 0, 0}, wlh = {10, 4, 0, hx, 0, 0};
+		PushPart(wrh);
+		Cube(-4, -4, -4, 6, 6, 6, 32, 0, 0, 64, 64, false);
+		glPopMatrix();
+		PushPart(wlh);
+		Cube(-4, -4, -4, 6, 6, 6, 32, 0, 0, 64, 64, false);
+		glPopMatrix();
+		glPopMatrix();
+		return;
+	}
+	if (golem)
+	{
+		// IronGolemModel (128x128): the head with its nose, an 18 px trunk, the waist, arms that hang to the
+		// knees, short legs. The legs end at y=24, the ground line of every rig; it stands 43 px tall. Its
+		// legs swing a little as it walks; for a blow both arms go up over its head and come down.
+		mctex::Bind(skin);
+		float sw = cosf(ls * 0.6662f) * 0.9f * la;
+		bool blow = (e->curstate.iuser4 & mcp::MCPF_MOB_SWING) != 0;
+		float arms = blow ? -2.4f : sw * 0.35f;
+		Part gh = {0, -7, -2, pitch * PI / 180.0f, 0, 0};
+		PushPart(gh);
+		Cube(-4, -12, -5.5f, 8, 10, 8, 0, 0, 0, 128, 128, false);
+		Cube(-1, -5, -7.5f, 2, 4, 2, 24, 0, 0, 128, 128, false);
+		glPopMatrix();
+		Part gb = {0, -7, 0, 0, 0, 0};
+		PushPart(gb);
+		Cube(-9, -2, -6, 18, 12, 11, 0, 40, 0, 128, 128, false);
+		Cube(-4.5f, 10, -3, 9, 5, 6, 0, 70, 0.5f, 128, 128, false);
+		glPopMatrix();
+		Part ra = {0, -7, 0, arms, 0, 0}, larm2 = {0, -7, 0, blow ? arms : -arms, 0, 0};
+		PushPart(ra);
+		Cube(-13, -2.5f, -3, 4, 30, 6, 60, 21, 0, 128, 128, false);
+		glPopMatrix();
+		PushPart(larm2);
+		Cube(9, -2.5f, -3, 4, 30, 6, 60, 58, 0, 128, 128, false);
+		glPopMatrix();
+		Part rl = {-4, 11, 0, -sw, 0, 0}, ll2 = {5, 11, 0, sw, 0, 0};
+		PushPart(rl);
+		Cube(-3.5f, -3, -3, 6, 16, 5, 37, 0, 0, 128, 128, false);
+		glPopMatrix();
+		PushPart(ll2);
+		Cube(-3.5f, -3, -3, 6, 16, 5, 60, 0, 0, 128, 128, true);
+		glPopMatrix();
 		glPopMatrix();
 		return;
 	}

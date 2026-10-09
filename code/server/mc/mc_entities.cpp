@@ -227,6 +227,7 @@ public:
 	int m_count = 1;
 	int m_pickupDelay = 10;
 	int m_damage = 0;
+	int m_ench = 0;
 	void Spawn() override
 	{
 		pev->classname = MAKE_STRING("mc_item");
@@ -252,14 +253,14 @@ public:
 				continue;
 			// pick up as much as fits; the rest stays on the ground (Minecraft)
 			int take = min(m_count, RoomFor(p, m_item, m_damage));
-			if (take > 0 && take < m_count && GiveItem(p, m_item, take, false, true, m_damage))
+			if (take > 0 && take < m_count && GiveItem(p, m_item, take, false, true, m_damage, m_ench))
 			{
 				m_count -= take;
 				float pitch = ((RANDOM_FLOAT(0, 1) - RANDOM_FLOAT(0, 1)) * 0.7f + 1.0f) * 2.0f;
 				FxSound(mcs::MCS_ITEM_PICKUP, p->pev->origin, 0.4f, pitch, p->entindex());
 				return;
 			}
-			if (take == m_count && GiveItem(p, m_item, m_count, false, true, m_damage))
+			if (take == m_count && GiveItem(p, m_item, m_count, false, true, m_damage, m_ench))
 			{
 				float pitch = ((RANDOM_FLOAT(0, 1) - RANDOM_FLOAT(0, 1)) * 0.7f + 1.0f) * 2.0f;
 				FxSound(mcs::MCS_ITEM_PICKUP, p->pev->origin, 0.4f, pitch, p->entindex());
@@ -341,6 +342,22 @@ public:
 	{
 		CBaseEntity* owner = pev->owner ? CBaseEntity::Instance(pev->owner) : nullptr;
 		CBaseEntity* victim = (hit && !FNullEnt(hit) && hit != ENT(0)) ? CBaseEntity::Instance(hit) : nullptr;
+		if (m_kind == mcp::MCE_SKULL)
+		{
+			CBasePlayer* by = (owner && owner->IsPlayer()) ? static_cast<CBasePlayer*>(owner) : nullptr;
+			if (victim && victim->IsPlayer() && victim != owner && by && static_cast<CBasePlayer*>(victim)->m_iTeam != by->m_iTeam)
+			{
+				victim->TakeDamage(by->pev, by->pev, 8.0f * mci::HP_PER_MC, DMG_CLUB);
+				WitherEffect(static_cast<CBasePlayer*>(victim), by);
+			}
+			float o[3] = {pev->origin.x, pev->origin.y, pev->origin.z};
+			if (pev->fuser1 > 0.5f)
+				ExplodeThroughAll(o, 1.0f, by);
+			else
+				Explode(o, 1.0f, nullptr, by, true);
+			UTIL_Remove(this);
+			return;
+		}
 		switch (m_kind)
 		{
 		case mcp::MCE_PEARL:
@@ -383,15 +400,20 @@ public:
 			if (victim && victim->pev->takedamage != DAMAGE_NO && victim != owner)
 			{
 				// AbstractArrow.onHitEntity: ceil(speed * baseDamage(2)), crit adds rand(dmg/2+2)
-				int dmg = (int)ceilf(speed * 2.0f);
+				float base = 2.0f + (pev->fuser2 > 0.0f ? 0.5f * pev->fuser2 + 0.5f : 0.0f); // Power
+				int dmg = (int)ceilf(speed * base);
 				if (pev->fuser1 > 0.0f)
 					dmg += RANDOM_LONG(0, dmg / 2 + 1);
 				Vector dir = m_vel.Normalize();
 				TraceResult tr;
 				UTIL_TraceLine(pev->origin - dir * 8.0f, pev->origin + dir * 16.0f, dont_ignore_monsters, nullptr, &tr);
 				ClearMultiDamage();
-				victim->TraceAttack(owner ? owner->pev : pev, dmg * mci::HP_PER_MC, dir, &tr, DMG_BULLET | DMG_NEVERGIB);
+				victim->TraceAttack(owner ? owner->pev : pev, dmg * mci::HP_PER_MC * McWeaponScale(), dir, &tr, DMG_BULLET | DMG_NEVERGIB);
 				ApplyMultiDamage(pev, owner ? owner->pev : pev);
+				if (pev->fuser3 > 0.0f)
+					EnchantIgnite(victim, (owner && owner->IsPlayer()) ? (CBasePlayer*)owner : nullptr, 5.0f); // Flame
+				if (pev->fuser4 > 0.0f && victim->IsPlayer())
+					victim->pev->velocity = victim->pev->velocity + Vector(dir.x, dir.y, 0) * (220.0f * pev->fuser4) + Vector(0, 0, 60); // Punch
 				FxSound(mcs::MCS_ARROW_HIT, pev->origin, 1.0f, 1.2f / (RANDOM_FLOAT(0.0f, 0.2f) + 0.9f));
 				if (owner && owner->IsPlayer() && victim->IsPlayer())
 					FxSound(mcs::MCS_ARROW_HIT_PLAYER, owner->pev->origin, 0.18f, 0.45f, owner->entindex(), owner->edict());
@@ -411,6 +433,23 @@ public:
 	}
 };
 LINK_ENTITY_TO_CLASS(mc_projectile, CMcThrown, CCSEntity)
+
+// A wither's skull: straight from its head at whoever it has picked out. Minecraft's numbers: 8 damage to
+// whoever it hits (40 here) and the Wither effect on him, and a blast of power 1 where it lands, which takes
+// what is as soft as planks. A blue one flies slower, and its blast takes every block but bedrock.
+CBaseEntity* SpawnSkull(CBasePlayer* owner, const Vector& from, const Vector& dir, bool blue)
+{
+	CMcThrown* t = GetClassPtr<CCSEntity>((CMcThrown*)nullptr);
+	t->m_kind = mcp::MCE_SKULL;
+	t->m_gravity = 0.0f;
+	t->Spawn();
+	t->SetMarkerData(mcp::MCE_SKULL, blue ? 1 : 0);
+	UTIL_SetOrigin(t->pev, from);
+	t->pev->owner = owner ? owner->edict() : nullptr;
+	t->pev->fuser1 = blue ? 1.0f : 0.0f;
+	t->m_vel = dir * (blue ? 0.6f : 1.1f);
+	return t;
+}
 
 CBaseEntity* SpawnThrown(CBasePlayer* pl, int kind, float speed)
 {
@@ -486,6 +525,7 @@ class CMcTnt : public CMcEntity
 public:
 	int m_fuse = 80;
 	CBaseEntity* m_source = nullptr;
+	int m_owner = 0; // player index of who lit it (0: nobody: a chain reaction, fire, redstone)
 	void Spawn() override
 	{
 		pev->classname = MAKE_STRING("mc_tnt");
@@ -499,23 +539,28 @@ public:
 		if (--m_fuse <= 0)
 		{
 			Vector o = pev->origin + Vector(0, 0, 0.0625f * B2U);
+			// the blast is the lighter's, like a grenade is its thrower's (kills count, mp_friendlyfire applies)
+			CBasePlayer* by = m_owner ? UTIL_PlayerByIndex(m_owner) : nullptr;
 			UTIL_Remove(this);
-			Explode(o, 4.0f, nullptr, nullptr);
+			Explode(o, 4.0f, nullptr, by, true);
 		}
 	}
 };
 LINK_ENTITY_TO_CLASS(mc_tnt, CMcTnt, CCSEntity)
 
-void PrimeTnt(const float* origin, int fuse)
+void PrimeTntBy(const float* origin, int fuse, CBasePlayer* by)
 {
 	CMcTnt* t = GetClassPtr<CCSEntity>((CMcTnt*)nullptr);
 	t->Spawn();
 	UTIL_SetOrigin(t->pev, Vector(origin[0], origin[1], origin[2]));
 	t->m_fuse = fuse;
+	t->m_owner = by ? by->entindex() : 0;
 	float a = RANDOM_FLOAT(0.0f, 6.2831853f);
 	t->m_vel = Vector(-sinf(a) * 0.02f, cosf(a) * 0.02f, 0.2f);
 	FxSound(mcs::MCS_TNT_PRIMED, t->pev->origin, 1.0f, 1.0f);
 }
+
+void PrimeTnt(const float* origin, int fuse) { PrimeTntBy(origin, fuse, nullptr); }
 
 // ---------------------------------------------------------------------------------------------
 // Falling block (sand/gravel with nothing below)
@@ -543,10 +588,17 @@ public:
 				float p[3] = {pev->origin.x, pev->origin.y, pev->origin.z + 2.0f};
 				int b[3];
 				g_world.ToBlock(p, b);
-				if (g_world.Get(b[0], b[1], b[2]) == 0)
+				if (g_world.Get(b[0], b[1], b[2]) != 0)
+					b[2]++;
+				if (BombKeepsFree(b[0], b[1], b[2]))
+				{
+					// nothing comes to rest against a planted bomb: it lies there as an item
+					int item = mci::FindItem(mcw::Block(mcw::CellType(m_cell)).name);
+					if (item > 0)
+						SpawnItemEntity(pev->origin, item, 1, nullptr);
+				}
+				else if (g_world.Get(b[0], b[1], b[2]) == 0)
 					SetBlock(b[0], b[1], b[2], m_cell);
-				else if (g_world.Get(b[0], b[1], b[2] + 1) == 0)
-					SetBlock(b[0], b[1], b[2] + 1, m_cell);
 			}
 			UTIL_Remove(this);
 		}
@@ -572,5 +624,10 @@ void SetItemDamage(CBaseEntity* item, int damage)
 {
 	if (item && FClassnameIs(item->pev, "mc_item"))
 		static_cast<CMcItemDrop*>(item)->m_damage = damage;
+}
+void SetItemEnchant(CBaseEntity* item, int ench)
+{
+	if (item && FClassnameIs(item->pev, "mc_item"))
+		static_cast<CMcItemDrop*>(item)->m_ench = ench;
 }
 } // namespace mc

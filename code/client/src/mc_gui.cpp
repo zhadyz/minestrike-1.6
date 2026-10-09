@@ -1,13 +1,19 @@
-// Minecraft's creative inventory screen (CreativeModeInventoryScreen): tabs, a 9x5 item grid with a
-// scroller, the hotbar row, tooltips, a Kits tab laid out like Minecraft's saved hotbars, and a button
-// for Counter-Strike's own buy menu. B opens it. While it is open the mouse drives a cursor instead of
+// The buy menu, in the shape of Minecraft's creative inventory screen (CreativeModeInventoryScreen): tabs, a
+// 9x5 item grid with a scroller, the hotbar row, tooltips, a Kits tab laid out like Minecraft's saved
+// hotbars, and a button for Counter-Strike's own buy menu. One tab holds Counter-Strike's guns and
+// equipment, the others the Minecraft items; outside creative mode every item carries its price and the
+// title bar shows the player's money. B opens it. While it is open the mouse drives a cursor instead of
 // the view (GuiPreCreateMove/GuiCreateMove turn the view change into cursor motion and undo it), the
 // player stands still, and clicks/keys never reach the game's bindings.
 #include "mc_client.h"
 #include "mc_draw.h"
 #include "mc_state.h"
+#include "mc_enchant.h"
 #include "mc_tex.h"
 #include "mc_sounds_gen.h"
+#include "mc_blocks.h"
+#include "mc_classic.h"
+#include "mc_move.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -30,6 +36,7 @@ static const int SCROLL_X = 175, SCROLL_Y = 18, SCROLL_H = 112;
 
 enum TabKind
 {
+	TAB_CS,
 	TAB_BLOCKS,
 	TAB_TOOLS,
 	TAB_COMBAT,
@@ -46,6 +53,7 @@ struct TabDef
 	int column;       // 0-4 from the left, 5-6 aligned right
 };
 static const TabDef kTabs[NUM_TABS] = {
+	{"Counter-Strike", nullptr, true, 1}, // drawn with a rifle
 	{"Building Blocks", "chiseled_sandstone", true, 0},
 	{"Tools & Utilities", "diamond_pickaxe", false, 0},
 	{"Combat", "diamond_sword", false, 1},
@@ -70,13 +78,64 @@ static const Kit kKits[] = {
 };
 static const int NUM_KITS = sizeof(kKits) / sizeof(kKits[0]);
 
+// Counter-Strike's own wares: the weapon id for the picture (0: equipment, pictured with a Minecraft item),
+// the buy command, the price, who may buy it (0 anyone, 1 Terrorists, 2 Counter-Terrorists)
+struct CsWare
+{
+	int weapon;
+	const char* icon;
+	const char* cmd;
+	const char* name;
+	int price, team;
+};
+static const CsWare kCsWares[] = {
+	{17, nullptr, "glock", "Glock-18", 400, 0}, {16, nullptr, "usp", "USP", 500, 0}, {1, nullptr, "p228", "P228", 600, 0},
+	{26, nullptr, "deagle", "Desert Eagle", 650, 0}, {11, nullptr, "fn57", "Five-SeveN", 750, 2}, {10, nullptr, "elites", "Dual Elites", 800, 1},
+	{21, nullptr, "m3", "M3", 1700, 0}, {5, nullptr, "xm1014", "XM1014", 3000, 0}, {23, nullptr, "tmp", "TMP", 1250, 2},
+	{7, nullptr, "mac10", "MAC-10", 1400, 1}, {19, nullptr, "mp5", "MP5", 1500, 0}, {12, nullptr, "ump45", "UMP45", 1700, 0},
+	{30, nullptr, "p90", "P90", 2350, 0}, {14, nullptr, "galil", "Galil", 2000, 1}, {15, nullptr, "famas", "FAMAS", 2250, 2},
+	{28, nullptr, "ak47", "AK-47", 2500, 1}, {22, nullptr, "m4a1", "M4A1", 3100, 2}, {27, nullptr, "sg552", "SG 552", 3500, 1},
+	{8, nullptr, "aug", "AUG", 3500, 2}, {3, nullptr, "scout", "Scout", 2750, 0}, {18, nullptr, "awp", "AWP", 4750, 0},
+	{24, nullptr, "g3sg1", "G3SG1", 5000, 1}, {13, nullptr, "sg550", "SG 550", 4200, 2}, {20, nullptr, "m249", "M249", 5750, 0},
+	{0, "iron_chestplate", "vest", "Kevlar", 650, 0}, {0, "iron_helmet", "vesthelm", "Kevlar + Helmet", 1000, 0},
+	{25, nullptr, "flash", "Flashbang", 200, 0}, {4, nullptr, "hegren", "HE Grenade", 300, 0}, {9, nullptr, "sgren", "Smoke Grenade", 300, 0},
+	{0, "flint_and_steel", "defuser", "Defuse Kit", 200, 2}, {0, "golden_carrot", "nvgs", "Night Vision", 1250, 0},
+	{0, "gunpowder", "primammo", "Primary Ammo", 0, 0}, {0, "raw_iron", "secammo", "Pistol Ammo", 0, 0},
+};
+static const int NUM_CS_WARES = sizeof(kCsWares) / sizeof(kCsWares[0]);
+
+// items cost money unless the player is in creative mode or the server runs without the economy
+static bool ShopPays()
+{
+	return !g_cl.creative && gEngfuncs.pfnGetCvarFloat((char*)"mc_economy") != 0.0f;
+}
+
+// the local player's team (1 Terrorists, 2 Counter-Terrorists, 0 unknown), from the bits the server packs
+// into playerclass
+static int LocalTeam()
+{
+	cl_entity_t* me = gEngfuncs.GetLocalPlayer();
+	return me ? (me->curstate.playerclass >> 12) & 3 : 0;
+}
+
+// A price tag in the corner of a grid cell: green when the player can pay, red when not
+static void PriceTag(int price, float x, float y, float s)
+{
+	if (price <= 0)
+		return;
+	char buf[12];
+	snprintf(buf, sizeof(buf), "$%d", price);
+	float ts = s * 0.5f;
+	mcdraw::Text(buf, x + 16.5f * s - mcdraw::TextWidth(buf) * ts, y + 12.5f * s, ts, g_cl.money >= price ? 0x55FF55FF : 0xFF5555FF);
+}
+
 static bool g_open = false;
-static int g_kind = 0; // 0 creative inventory, 1 survival inventory (Shift+E)
+static int g_kind = 0; // 0 creative inventory, 1 survival inventory (Shift+E), 2 enchanting table
 static bool g_shift = false, g_ctrl = false;
 static bool ShiftDown() { return (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0; }
 static bool CtrlDown() { return (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0; }
 static int g_forceShift = -1; // test aid: mc_guiclick overrides
-static int g_tab = TAB_COMBAT;
+static int g_tab = TAB_CS;
 static int g_scrollRow = 0;
 static float g_mx = 0, g_my = 0;         // cursor, screen pixels
 static float g_savedAngles[3];
@@ -91,8 +150,10 @@ static bool InTab(const mci::ItemDef& d, int tab)
 	{
 	case TAB_BLOCKS: return d.type == mci::IT_BLOCK;
 	case TAB_TOOLS:
+		// (with what enchanting needs: the table, bookshelves and lapis lazuli are also on their own tabs)
 		return d.type == mci::IT_PICKAXE || d.type == mci::IT_SHOVEL || d.type == mci::IT_AXE || d.type == mci::IT_FLINT_STEEL ||
-			d.type == mci::IT_ELYTRA || d.type == mci::IT_FIREWORK || d.type == mci::IT_PEARL || d.type == mci::IT_XP_BOTTLE;
+			d.type == mci::IT_ELYTRA || d.type == mci::IT_FIREWORK || d.type == mci::IT_PEARL || d.type == mci::IT_XP_BOTTLE ||
+			!strcmp(d.name, "enchanting_table") || !strcmp(d.name, "bookshelf") || !strcmp(d.name, "lapis_lazuli");
 	case TAB_COMBAT:
 		return d.type == mci::IT_SWORD || d.type == mci::IT_AXE || d.type == mci::IT_MACE || d.type == mci::IT_BOW || d.type == mci::IT_ARROW ||
 			d.type == mci::IT_ARMOR || d.type == mci::IT_TOTEM;
@@ -108,6 +169,15 @@ static void BuildList()
 		return;
 	g_listTab = g_tab;
 	g_numItems = 0;
+	if (g_tab == TAB_CS)
+	{
+		// Counter-Strike wares the player's team may buy, as negative entries (-1 - index)
+		int team = LocalTeam();
+		for (int k = 0; k < NUM_CS_WARES; k++)
+			if (!kCsWares[k].team || !team || kCsWares[k].team == team)
+				g_items[g_numItems++] = -1 - k;
+		return;
+	}
 	for (int k = 0; k < mci::ItemTotal() && g_numItems < 512; k++)
 	{
 		int id = mci::ItemIdAt(k);
@@ -148,6 +218,7 @@ void GuiShow()
 	gEngfuncs.GetViewAngles(g_savedAngles);
 	float level[3] = {0.0f, g_savedAngles[1], 0.0f};
 	gEngfuncs.SetViewAngles(level);
+	g_listTab = -1; // the Counter-Strike tab depends on the team
 	BuildList();
 }
 
@@ -174,6 +245,8 @@ void GuiHide()
 	g_open = false;
 	if (g_kind == 1)
 		gEngfuncs.pfnServerCmd((char*)"mc_invclose"); // cursor stack and crafting grid go back
+	if (g_kind == 2)
+		gEngfuncs.pfnServerCmd((char*)"mc_ench_close");
 	float a[3];
 	gEngfuncs.GetViewAngles(a);
 	g_savedAngles[1] = a[1];
@@ -287,6 +360,8 @@ static void TooltipLines(const TipLine* lines, int n, float s)
 	float x = g_mx / s + 12, y = g_my / s - 12;
 	if ((x + w + 4) * s > g_cl.screenW)
 		x = g_mx / s - 16 - w;
+	if (x < 4)
+		x = fmaxf(4.0f, g_cl.screenW / s - w - 4); // too wide for either side of the cursor: as far right as it fits
 	if ((y + h + 4) * s > g_cl.screenH)
 		y = g_cl.screenH / s - h - 4;
 	if (y < 4)
@@ -337,19 +412,35 @@ static void Num(char* out, size_t n, float v)
 }
 
 // ItemStack.getTooltipLines: name, then the attribute block ("When in Main Hand:" ...)
+static int g_tipEnch = 0; // the enchantments of the stack the next tooltip is for (0: none)
 static void ItemTooltip(int itemId, const char* hint, float s)
 {
 	const mci::ItemDef& d = mci::Item(itemId);
-	TipLine l[8];
+	TipLine l[12];
 	int n = 0;
 	auto add = [&](unsigned c, const char* fmt, auto... args) {
-		if (n < 8)
+		if (n < 12)
 		{
 			snprintf(l[n].text, sizeof(l[n].text), fmt, args...);
 			l[n++].color = c;
 		}
 	};
-	add(mcdraw::RarityColor(d.rarity), "%s", d.display);
+	// an enchanted item's name is aqua, and its enchantments come first, like Minecraft's
+	add(g_tipEnch ? 0x55FFFFFF : mcdraw::RarityColor(d.rarity), "%s", d.display);
+	if (g_tipEnch)
+	{
+		char el[4][32];
+		int en = mce::Describe(d, (uint16_t)g_tipEnch, el);
+		for (int i = 0; i < en; i++)
+			add(0xAAAAAAFF, "%s", el[i]);
+	}
+	// the economy (mc_economy.cpp): what one costs, unless items are free (creative mode, mc_economy 0)
+	if (!g_cl.creative && gEngfuncs.pfnGetCvarFloat((char*)"mc_economy") != 0.0f)
+	{
+		int price = mci::Price(itemId);
+		if (price > 0)
+			add(0xFFFF55FF, d.maxStack > 1 ? "$%d each" : "$%d", price);
+	}
 	char a[16], b[16];
 	bool weapon = d.type == mci::IT_SWORD || d.type == mci::IT_AXE || d.type == mci::IT_MACE || d.type == mci::IT_PICKAXE || d.type == mci::IT_SHOVEL;
 	if (weapon)
@@ -376,6 +467,59 @@ static void ItemTooltip(int itemId, const char* hint, float s)
 		{
 			Num(a, sizeof(a), d.knockbackResist * 10.0f);
 			add(0x5555FFFF, "+%s Knockback Resistance", a);
+		}
+	}
+	// a block that can stand in a bullet's way: what it does there (mcw::BulletClassOf)
+	if (d.type == mci::IT_BLOCK && d.blockName)
+	{
+		int type = mcw::FindBlock(d.blockName);
+		if (type > 0)
+		{
+			const mcw::BlockDef& b = mcw::Block((uint16_t)type);
+			bool solid = b.shape == mcw::SHAPE_CUBE || b.shape == mcw::SHAPE_SLAB || b.shape == mcw::SHAPE_STAIRS || b.shape == mcw::SHAPE_PANE ||
+				b.shape == mcw::SHAPE_DOOR;
+			if (solid && !(b.flags & mcw::BF_EXPLOSIVE))
+			{
+				const mcc::Classic* cm = mcm::GetClassic();
+				switch (mcw::BulletClassOf(b, cm && cm->map.loaded))
+				{
+				case mcw::BULLET_STOPS:
+					add(0x55FF55FF, "Stops every bullet");
+					break;
+				case mcw::BULLET_WOOD:
+					add(0xFFFF55FF, "Stops pistols and SMGs");
+					add(0xAAAAAAFF, "Rifles go through it. It burns.");
+					break;
+				case mcw::BULLET_SHATTERS:
+					add(0xFF5555FF, "Stops no bullet");
+					add(0xAAAAAAFF, "Shatters when shot");
+					break;
+				case mcw::BULLET_BARS:
+					add(0xFF5555FF, "Stops no bullet");
+					add(0xAAAAAAFF, "To see and shoot through");
+					break;
+				default:
+					add(0xFF5555FF, "Stops no bullet");
+					break;
+				}
+				if (!strcmp(b.name, "obsidian"))
+					add(0xAAAAAAFF, "TNT does not move it");
+				// what the mobs are built from (mc_mobs.cpp)
+				if (!strcmp(b.name, "carved_pumpkin"))
+				{
+					add(0x55FFFFFF, "On four iron blocks in a T:");
+					add(0x55FFFFFF, "an iron golem for your side");
+				}
+				else if (!strcmp(b.name, "iron_block"))
+					add(0xAAAAAAFF, "Four in a T, a carved pumpkin on top: an iron golem");
+				else if (!strcmp(b.name, "wither_skeleton_skull"))
+				{
+					add(0x55FFFFFF, "Three on four soul sand in a T:");
+					add(0x55FFFFFF, "a wither for your side");
+				}
+				else if (!strcmp(b.name, "soul_sand"))
+					add(0xAAAAAAFF, "Four in a T, three skulls on top: a wither");
+			}
 		}
 	}
 	if (hint)
@@ -409,12 +553,17 @@ static void DrawTab(const Layout& L, int tab, bool selected)
 	snprintf(spr, sizeof(spr), "gui/sprites/container/creative_inventory/tab_%s_%s_%d", t.top ? "top" : "bottom",
 		selected ? "selected" : "unselected", t.column + 1);
 	mcdraw::BlitFull(spr, x, y, w, h);
-	int icon = mci::FindItem(t.icon);
+	int icon = t.icon ? mci::FindItem(t.icon) : 0;
 	if (icon > 0)
 		mcdraw::ItemIcon(icon, x + 5 * L.s, y + (t.top ? 9 : 7) * L.s, 16 * L.s);
+	else if (!t.icon)
+		DrawCsWeaponIcon(28, x + 5 * L.s, y + (t.top ? 9 : 7) * L.s, 16 * L.s); // an AK-47 for the Counter-Strike tab
 }
 
 static void DrawInventoryScreen();
+static void DrawEnchantScreen();
+static bool EnchantKey(int keynum, const char* binding);
+static void EnchLayout(float& s, float& left, float& top);
 void GuiDraw()
 {
 	if (!g_open)
@@ -422,6 +571,11 @@ void GuiDraw()
 	if (g_kind == 1)
 	{
 		DrawInventoryScreen();
+		return;
+	}
+	if (g_kind == 2)
+	{
+		DrawEnchantScreen();
 		return;
 	}
 	BuildList();
@@ -439,6 +593,13 @@ void GuiDraw()
 	mcdraw::Blit("gui/container/creative_inventory/tab_items", L.left, L.top, IMG_W * s, IMG_H * s, 0, 0, IMG_W, IMG_H);
 	DrawTab(L, g_tab, true);
 	mcdraw::Text(kTabs[g_tab].title, L.left + 8 * s, L.top + 6 * s, s, 0x404040FF, false);
+	bool pays = ShopPays();
+	if (pays)
+	{
+		char money[16];
+		snprintf(money, sizeof(money), "$%d", g_cl.money);
+		mcdraw::Text(money, L.left + (IMG_W - 26 - mcdraw::TextWidth(money)) * s, L.top + 6 * s, s, 0x1F7A1FFF, false);
+	}
 
 	// grid
 	int kitHover = -1;
@@ -465,6 +626,16 @@ void GuiDraw()
 				if (idx < g_numItems)
 					id = g_items[idx];
 			}
+			if (id < 0)
+			{
+				// a Counter-Strike ware
+				const CsWare& w = kCsWares[-1 - id];
+				if (w.weapon)
+					DrawCsWeaponIcon(w.weapon, x, y, 16 * s);
+				else
+					mcdraw::ItemIcon(mci::FindItem(w.icon), x, y, 16 * s);
+				PriceTag(w.price, x, y, s);
+			}
 			if (id > 0)
 			{
 				mcdraw::ItemIcon(id, x, y, 16 * s);
@@ -474,9 +645,22 @@ void GuiDraw()
 					snprintf(buf, sizeof(buf), "%d", count);
 					mcdraw::Text(buf, x + 17 * s - mcdraw::TextWidth(buf) * s, y + 9 * s, s, 0xFFFFFFFF);
 				}
+				if (pays && g_tab != TAB_KITS)
+					PriceTag(mci::Price(id), x, y, s);
+			}
+			if (pays && g_tab == TAB_KITS && c == 7 && g_scrollRow + r < NUM_KITS)
+			{
+				// the whole row's price at its end
+				const Kit& kit = kKits[g_scrollRow + r];
+				int total = 0;
+				for (int i = 0; i < 7 && kit.items[i]; i++)
+					total += mci::Price(mci::FindItem(kit.items[i])) * kit.counts[i];
+				char buf[12];
+				snprintf(buf, sizeof(buf), "$%d", total);
+				mcdraw::Text(buf, x + 1 * s, y + 5 * s, s * 0.75f, g_cl.money >= total ? 0x1F7A1FFF : 0xAA2020FF, false);
 			}
 			bool hot = g_tab == TAB_KITS ? (kitHover == g_scrollRow + r && hoverCell >= 0) : (hoverCell == r * COLS + c);
-			if (hot && (id > 0 || g_tab != TAB_KITS))
+			if (hot && (id != 0 || g_tab != TAB_KITS))
 				mcdraw::Rect(x, y, 16 * s, 16 * s, 0xFFFFFF80);
 		}
 	}
@@ -505,7 +689,17 @@ void GuiDraw()
 	mcdraw::TextCentered("Counter-Strike Buy Menu", bx + bw * 0.5f, by + 6 * s, s, bhot ? 0xFFFFA0FF : 0xFFFFFFFF);
 
 	// tooltips
-	if (hoverItem > 0)
+	if (hoverItem < 0)
+	{
+		const CsWare& w = kCsWares[-1 - hoverItem];
+		char line[64];
+		if (w.price > 0)
+			snprintf(line, sizeof(line), "$%d  -  click to buy", w.price);
+		else
+			snprintf(line, sizeof(line), "click to buy");
+		Tooltip(w.name, 0xFFAA00FF, line, s);
+	}
+	else if (hoverItem > 0)
 	{
 		const mci::ItemDef& d = mci::Item(hoverItem);
 		if (g_tab == TAB_KITS && kitHover >= 0)
@@ -515,10 +709,15 @@ void GuiDraw()
 			Tooltip(t, 0x55FFFFFF, "Click to equip the whole row", s);
 		}
 		else
-			ItemTooltip(hoverItem, d.type == mci::IT_ARMOR || d.type == mci::IT_ELYTRA ? "Click to wear" : "Click: stack, right-click: one, 6-9: slot", s);
+			ItemTooltip(hoverItem, pays ? (d.maxStack > 1 ? "Click: as many as you can pay for, right-click: one" : "Click to buy")
+									   : d.type == mci::IT_ARMOR || d.type == mci::IT_ELYTRA ? "Click to wear" : "Click: stack, right-click: one, 6-9: slot", s);
 	}
 	else if (hb >= 0 && g_cl.hotbarId[hb] > 0)
+	{
+		g_tipEnch = g_cl.ench[36 + hb];
 		ItemTooltip(g_cl.hotbarId[hb], "Right-click to destroy", s);
+		g_tipEnch = 0;
+	}
 	else
 	{
 		for (int t = 0; t < NUM_TABS; t++)
@@ -566,6 +765,13 @@ static void Click(bool right)
 	}
 	int kit = -1;
 	int item = HoverItem(L, &kit);
+	if (item < 0)
+	{
+		// a Counter-Strike ware: Counter-Strike's own buy command (it checks the buy zone, the time, the money)
+		gEngfuncs.pfnServerCmd((char*)kCsWares[-1 - item].cmd);
+		ClickSound();
+		return;
+	}
 	if (item > 0)
 	{
 		char cmd[96];
@@ -635,6 +841,8 @@ bool GuiKey(int down, int keynum, const char* binding)
 		return false;
 	if (g_kind == 1)
 		return InventoryKey(keynum, binding);
+	if (g_kind == 2)
+		return EnchantKey(keynum, binding);
 	if (keynum == K_MOUSE1 || keynum == K_MOUSE2)
 		Click(keynum == K_MOUSE2);
 	else if (keynum == K_MWHEELUP && g_scrollRow > 0)
@@ -647,7 +855,7 @@ bool GuiKey(int down, int keynum, const char* binding)
 	{
 		// Minecraft: hover an item and press a hotbar number to put it in that slot
 		Layout L = GetLayout();
-		int item = g_tab == TAB_KITS ? 0 : HoverItem(L, nullptr);
+		int item = (g_tab == TAB_KITS || g_tab == TAB_CS) ? 0 : HoverItem(L, nullptr);
 		if (item > 0)
 		{
 			const mci::ItemDef& d = mci::Item(item);
@@ -795,7 +1003,11 @@ static void DrawInventoryScreen()
 		int id, count, dmg;
 		SlotItem(hover, id, count, dmg);
 		if (id > 0)
+		{
+			g_tipEnch = (hover >= 5 && hover <= 45) ? g_cl.ench[hover] : 0;
 			ItemTooltip(id, nullptr, s);
+			g_tipEnch = 0;
+		}
 		else if (id < 0)
 			Tooltip(CsWeaponDisplayName(-id), 0xFFAA00FF, "Counter-Strike weapon: move it anywhere, throw it out to drop it", s);
 	}
@@ -832,7 +1044,7 @@ static bool InventoryKey(int keynum, const char* binding)
 	return false;
 }
 
-// test aid: mc_guicursor grid <col> <row> | tab <n> | hotbar <i> | button
+// test aid: mc_guicursor grid <col> <row> | tab <n> | hotbar <i> | button | ench <offer 0-2> | close
 static void Cmd_GuiCursor()
 {
 	Layout L = GetLayout();
@@ -873,6 +1085,16 @@ static void Cmd_GuiCursor()
 		GuiKey(1, a ? K_MOUSE2 : K_MOUSE1, nullptr);
 		g_forceShift = -1;
 	}
+	else if (!strcmp(kind, "ench"))
+	{
+		// the enchanting screen: the middle of an offer
+		float s, left, top;
+		EnchLayout(s, left, top);
+		g_mx = left + (60 + 54) * s;
+		g_my = top + (14 + 19 * a + 9) * s;
+	}
+	else if (!strcmp(kind, "close"))
+		GuiHide();
 	else if (!strcmp(kind, "button"))
 	{
 		float x, y, w, h;
@@ -940,4 +1162,304 @@ void GuiCreateMove(usercmd_t* cmd)
 	cmd->forwardmove = cmd->sidemove = cmd->upmove = 0.0f;
 	cmd->buttons &= ~(IN_ATTACK | IN_ATTACK2 | IN_JUMP | IN_DUCK | IN_USE | IN_RELOAD | IN_FORWARD | IN_BACK | IN_MOVELEFT | IN_MOVERIGHT);
 }
+// ---------------------------------------------------------------------------------------------
+// The enchanting table's screen (EnchantmentScreen): the item slot, the lapis lazuli slot, three offers
+// written in the Standard Galactic Alphabet with the level each asks for, and the player's inventory. The
+// server decides everything (mc_enchant_srv.cpp); this draws what it sent and sends the clicks back. The
+// item stays in the inventory on the server; the screen shows it in the table's slot instead.
+
+static const int ENCH_W = 176, ENCH_H = 166;
+
+static void EnchLayout(float& s, float& left, float& top)
+{
+	s = GuiScale();
+	left = floorf((g_cl.screenW - ENCH_W * s) * 0.5f);
+	top = floorf((g_cl.screenH - ENCH_H * s) * 0.5f);
+}
+
+// 9..44: an inventory slot (storage, hotbar); 100: the item slot; 101: the lapis slot; 200..202: an offer
+static int EnchHover()
+{
+	float s, left, top;
+	EnchLayout(s, left, top);
+	for (int slot = 9; slot <= 44; slot++)
+	{
+		int x = slot <= 35 ? 8 + ((slot - 9) % 9) * 18 : 8 + (slot - 36) * 18, y = slot <= 35 ? 84 + ((slot - 9) / 9) * 18 : 142;
+		if (Inside(g_mx, g_my, left + x * s, top + y * s, 16 * s, 16 * s))
+			return slot;
+	}
+	if (Inside(g_mx, g_my, left + 15 * s, top + 47 * s, 16 * s, 16 * s))
+		return 100;
+	if (Inside(g_mx, g_my, left + 35 * s, top + 47 * s, 16 * s, 16 * s))
+		return 101;
+	for (int i = 0; i < 3; i++)
+		if (Inside(g_mx, g_my, left + 60 * s, top + (14 + 19 * i) * s, 108 * s, 19 * s))
+			return 200 + i;
+	return -1;
+}
+
+static int EnchLapis()
+{
+	int lapis = mci::FindItem("lapis_lazuli"), n = 0;
+	for (int i = 0; i < 27; i++)
+		if (g_cl.invId[i] == lapis)
+			n += g_cl.invCount[i];
+	for (int i = 0; i < mcp::HOTBAR_SIZE; i++)
+		if (g_cl.hotbarId[i] == lapis)
+			n += g_cl.hotbarCount[i];
+	return n;
+}
+
+static bool EnchCan(int i, int lapis)
+{
+	int level = g_cl.enchLevel[i];
+	return level > 0 && (g_cl.creative || (g_cl.xpLevel >= level && g_cl.xpLevel >= i + 1 && lapis >= i + 1));
+}
+
+// Text in the Standard Galactic Alphabet (font/ascii_sga.png: the same 16x16 grid as the main font),
+// wrapped at maxW font pixels over at most two lines
+static void DrawSga(const char* text, float x, float y, float s, unsigned color, float maxW)
+{
+	float cx = 0.0f, cy = 0.0f;
+	for (const char* p = text; *p; p++)
+	{
+		if (*p == ' ')
+		{
+			// wrap before a word that would not fit
+			float w = 0.0f;
+			for (const char* q = p + 1; *q && *q != ' '; q++)
+				w += 6.0f;
+			cx += 4.0f;
+			if (cx + w > maxW)
+			{
+				cx = 0.0f;
+				cy += 9.0f;
+				if (cy > 9.0f)
+					return;
+			}
+			continue;
+		}
+		int c = (unsigned char)*p;
+		float u = (float)((c % 16) * 8), v = (float)((c / 16) * 8);
+		mcdraw::Blit("font/ascii_sga", x + cx * s, y + cy * s, 8 * s, 8 * s, u, v, u + 8, v + 8, color);
+		cx += 6.0f;
+	}
+}
+
+// EnchantmentNames: a few words picked by the offer's seed
+static void EnchWords(unsigned seed, char* out, size_t n)
+{
+	static const char* words[] = {"the", "elder", "scrolls", "klaatu", "berata", "niktu", "xyzzy", "bless", "curse", "light", "darkness", "fire", "air",
+		"earth", "water", "hot", "dry", "cold", "wet", "ignite", "snuff", "embiggen", "twist", "shorten", "stretch", "fiddle", "destroy", "imbue", "galvanize",
+		"enchant", "free", "limited", "range", "of", "towards", "inside", "sphere", "cube", "self", "other", "ball", "mental", "physical", "grow", "shrink",
+		"demon", "elemental", "spirit", "animal", "creature", "beast", "humanoid", "undead", "fresh", "stale", "phnglui", "mglwnafh", "cthulhu", "rlyeh",
+		"wgahnagl", "fhtagn", "baguette"};
+	const int count = sizeof(words) / sizeof(words[0]);
+	out[0] = 0;
+	unsigned r = seed * 2654435761u + 12345u;
+	int k = 3 + (int)((r >> 20) % 2);
+	for (int i = 0; i < k; i++)
+	{
+		r = r * 1664525u + 1013904223u;
+		if (i)
+			strncat(out, " ", n - strlen(out) - 1);
+		strncat(out, words[(r >> 10) % count], n - strlen(out) - 1);
+	}
+}
+
+// What the server let us see of an offer: "Sharpness IV"
+static bool EnchClue(int i, char* out, size_t n)
+{
+	static const char* roman[8] = {"", "I", "II", "III", "IV", "V", "VI", "VII"};
+	int id = 0, count, dmg;
+	if (g_cl.enchSlot >= 9 && g_cl.enchSlot <= 44)
+		SlotItem(g_cl.enchSlot, id, count, dmg);
+	else if (g_cl.enchSlot >= 5 && g_cl.enchSlot <= 8)
+		id = g_cl.armorId[g_cl.enchSlot - 5];
+	if (id <= 0 || !g_cl.enchClueLevel[i])
+		return false;
+	const mci::ItemDef& d = mci::Item(id);
+	int kind = g_cl.enchClueKind[i];
+	const char* name = kind == 0 ? mce::MainName(d) : kind == 1 ? "Unbreaking" : kind == 2 ? mce::FireName(d) : mce::KnockName(d);
+	if (!name)
+		return false;
+	snprintf(out, n, "%s %s", name, roman[g_cl.enchClueLevel[i] & 7]);
+	return true;
+}
+
+static void DrawEnchantScreen()
+{
+	float s, left, top;
+	EnchLayout(s, left, top);
+	mcdraw::Begin2D(g_cl.screenW, g_cl.screenH);
+	mcdraw::Rect(0, 0, (float)g_cl.screenW, (float)g_cl.screenH, 0x101010B0);
+	mcdraw::Blit("gui/container/enchanting_table", left, top, ENCH_W * s, ENCH_H * s, 0, 0, ENCH_W, ENCH_H);
+	mcdraw::Text("Enchant", left + 12 * s, top + 5 * s, s, 0x404040FF, false);
+	mcdraw::Text("Inventory", left + 8 * s, top + 72 * s, s, 0x404040FF, false);
+	int hover = EnchHover(), lapis = EnchLapis();
+
+	// the item in the table's slot, and the lapis lazuli
+	int tid = 0, tcount = 0, tdmg = 0;
+	if (g_cl.enchSlot >= 9 && g_cl.enchSlot <= 44)
+		SlotItem(g_cl.enchSlot, tid, tcount, tdmg);
+	else if (g_cl.enchSlot >= 5 && g_cl.enchSlot <= 8)
+		tid = g_cl.armorId[g_cl.enchSlot - 5];
+	if (tid > 0)
+		DrawStack(tid, 1, left + 15 * s, top + 47 * s, s);
+	if (lapis > 0)
+		DrawStack(mci::FindItem("lapis_lazuli"), lapis > 64 ? 64 : lapis, left + 35 * s, top + 47 * s, s);
+	else
+		mcdraw::BlitFull("gui/sprites/container/slot/lapis_lazuli", left + 35 * s, top + 47 * s, 16 * s, 16 * s);
+	if (hover == 100 || hover == 101)
+		mcdraw::Rect(left + (hover == 100 ? 15 : 35) * s, top + 47 * s, 16 * s, 16 * s, 0xFFFFFF80);
+
+	// the three offers
+	for (int i = 0; i < 3; i++)
+	{
+		float x = left + 60 * s, y = top + (14 + 19 * i) * s;
+		int level = g_cl.enchLevel[i];
+		if (!level || tid <= 0)
+		{
+			mcdraw::BlitFull("gui/sprites/container/enchanting_table/enchantment_slot_disabled", x, y, 108 * s, 19 * s);
+			continue;
+		}
+		bool can = EnchCan(i, lapis), hot = can && hover == 200 + i;
+		mcdraw::BlitFull(!can ? "gui/sprites/container/enchanting_table/enchantment_slot_disabled"
+							  : hot ? "gui/sprites/container/enchanting_table/enchantment_slot_highlighted" : "gui/sprites/container/enchanting_table/enchantment_slot",
+			x, y, 108 * s, 19 * s);
+		char icon[80], words[96], num[8];
+		snprintf(icon, sizeof(icon), "gui/sprites/container/enchanting_table/level_%d%s", i + 1, can ? "" : "_disabled");
+		mcdraw::BlitFull(icon, x + 1 * s, y + 1 * s, 16 * s, 16 * s);
+		EnchWords(g_cl.enchSeed + (unsigned)i * 977u, words, sizeof(words));
+		DrawSga(words, x + 20 * s, y + 2 * s, s, !can ? 0x342F25FF : hot ? 0xFFFF80FF : 0x685E4AFF, 86.0f);
+		snprintf(num, sizeof(num), "%d", level);
+		mcdraw::Text(num, x + (106 - mcdraw::TextWidth(num)) * s, y + 9 * s, s, can ? 0x80FF20FF : 0x407F10FF);
+	}
+
+	// the inventory, without the item that sits in the table
+	for (int slot = 9; slot <= 44; slot++)
+	{
+		int x = slot <= 35 ? 8 + ((slot - 9) % 9) * 18 : 8 + (slot - 36) * 18, y = slot <= 35 ? 84 + ((slot - 9) / 9) * 18 : 142;
+		float sx = left + x * s, sy = top + y * s;
+		if (slot != g_cl.enchSlot)
+		{
+			if (slot >= 36)
+				DrawSlotItem(slot - 36, sx, sy, s);
+			else
+			{
+				int id, count, dmg;
+				SlotItem(slot, id, count, dmg);
+				DrawStack(id, count, sx, sy, s);
+			}
+		}
+		if (hover == slot)
+			mcdraw::Rect(sx, sy, 16 * s, 16 * s, 0xFFFFFF80);
+	}
+
+	// tooltips
+	if (hover >= 200 && tid > 0 && g_cl.enchLevel[hover - 200])
+	{
+		int i = hover - 200, level = g_cl.enchLevel[i];
+		TipLine l[5];
+		int n = 0;
+		char clue[48];
+		if (EnchClue(i, clue, sizeof(clue)))
+		{
+			snprintf(l[n].text, sizeof(l[n].text), "%s . . . ?", clue);
+			l[n++].color = 0xFFFFFFFF;
+		}
+		if (!g_cl.creative && g_cl.xpLevel < level)
+		{
+			snprintf(l[n].text, sizeof(l[n].text), "Level Requirement: %d", level);
+			l[n++].color = 0xFF5555FF;
+		}
+		else
+		{
+			snprintf(l[n].text, sizeof(l[n].text), "%d Lapis Lazuli", i + 1);
+			l[n++].color = (g_cl.creative || lapis >= i + 1) ? 0xAAAAAAFF : 0xFF5555FF;
+			snprintf(l[n].text, sizeof(l[n].text), i == 0 ? "%d Enchantment Level" : "%d Enchantment Levels", i + 1);
+			l[n++].color = 0xAAAAAAFF;
+		}
+		TooltipLines(l, n, s);
+	}
+	else if (hover >= 9 && hover <= 44 && hover != g_cl.enchSlot)
+	{
+		int id, count, dmg;
+		SlotItem(hover, id, count, dmg);
+		if (id > 0)
+		{
+			g_tipEnch = g_cl.ench[hover];
+			ItemTooltip(id, !g_tipEnch && mce::Enchantable(mci::Item(id)) ? "Click to put it on the table" : nullptr, s);
+			g_tipEnch = 0;
+		}
+	}
+	else if (hover == 100 && tid > 0)
+	{
+		g_tipEnch = g_cl.ench[g_cl.enchSlot];
+		ItemTooltip(tid, "Click to take it back", s);
+		g_tipEnch = 0;
+	}
+	else if (hover == 101)
+		Tooltip("Lapis Lazuli", 0xFFFFFFFF, "An offer costs 1, 2 or 3 of it, from your inventory", s);
+	DrawCursor();
+	mcdraw::End2D();
+}
+
+// Returns false when the key was consumed by the screen.
+static bool EnchantKey(int keynum, const char* binding)
+{
+	if (keynum == K_ESCAPE || keynum == 'e')
+	{
+		GuiHide();
+		return false;
+	}
+	if (keynum != K_MOUSE1 && keynum != K_MOUSE2)
+		return false;
+	int hover = EnchHover();
+	char cmd[48];
+	if (hover >= 9 && hover <= 44)
+	{
+		int id, count, dmg;
+		SlotItem(hover, id, count, dmg);
+		if (id > 0 && !g_cl.ench[hover] && mce::Enchantable(mci::Item(id)))
+		{
+			snprintf(cmd, sizeof(cmd), "mc_ench_item %d", hover);
+			gEngfuncs.pfnServerCmd(cmd);
+			ClickSound();
+		}
+	}
+	else if (hover == 100 && g_cl.enchSlot)
+	{
+		gEngfuncs.pfnServerCmd((char*)"mc_ench_item 0");
+		ClickSound();
+	}
+	else if (hover >= 200 && EnchCan(hover - 200, EnchLapis()))
+	{
+		snprintf(cmd, sizeof(cmd), "mc_ench_pick %d", hover - 200);
+		gEngfuncs.pfnServerCmd(cmd);
+	}
+	return false;
+}
+
+// The server opened or closed the table (MCMSG_ENCHUI)
+void GuiEnchant(bool open)
+{
+	if (open)
+	{
+		if (g_open && g_kind == 2)
+			return;
+		if (g_open)
+			GuiHide();
+		g_kind = 2;
+		g_mx = g_cl.screenW * 0.5f;
+		g_my = g_cl.screenH * 0.5f;
+		gEngfuncs.GetViewAngles(g_savedAngles);
+		float level[3] = {0.0f, g_savedAngles[1], 0.0f};
+		gEngfuncs.SetViewAngles(level);
+		g_open = true;
+	}
+	else if (g_open && g_kind == 2)
+		GuiHide();
+}
+
 } // namespace mc

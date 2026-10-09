@@ -36,6 +36,8 @@ bool CreeperExploded(CBasePlayer* pl)
 // matches the model.
 Mob MobOf(CBasePlayer* pl)
 {
+	if (IsMobBot(pl))
+		return TeamMobOf(pl) == TM_WITHER ? MOB_WITHER : MOB_GOLEM;
 	const char* name = STRING(pl->pev->netname);
 	if (strstr(name, "Creeper"))
 		return MOB_CREEPER;
@@ -70,6 +72,8 @@ int MobHurtSound(CBasePlayer* pl)
 	case MOB_ZOMBIE: return mcs::MCS_ZOMBIE_HURT;
 	case MOB_HUSK: return mcs::MCS_HUSK_HURT;
 	case MOB_DROWNED: return mcs::MCS_DROWNED_HURT;
+	case MOB_GOLEM: return mcs::MCS_IRON_GOLEM_HURT;
+	case MOB_WITHER: return mcs::MCS_WITHER_HURT;
 	default: return mcs::MCS_PLAYER_HURT;
 	}
 }
@@ -83,6 +87,8 @@ int MobDeathSound(CBasePlayer* pl)
 	case MOB_ZOMBIE: return mcs::MCS_ZOMBIE_DEATH;
 	case MOB_HUSK: return mcs::MCS_HUSK_DEATH;
 	case MOB_DROWNED: return mcs::MCS_DROWNED_DEATH;
+	case MOB_GOLEM: return mcs::MCS_IRON_GOLEM_DEATH;
+	case MOB_WITHER: return mcs::MCS_WITHER_DEATH;
 	default: return mcs::MCS_PLAYER_DEATH;
 	}
 }
@@ -320,7 +326,7 @@ static float SeenPercent(const Vector& c, CBasePlayer* p)
 
 // Explosion.explode, entity part: damage = (int)((i*i + i) / 2 * 7 * 2r + 1), i = (1 - d/2r) * exposure,
 // and a push of i blocks/tick away from the blast.
-void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker)
+void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker, bool spareMates)
 {
 	Vector c(origin[0], origin[1], origin[2]);
 	if (POINT_CONTENTS(c) == CONTENTS_SOLID)
@@ -331,6 +337,8 @@ void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker)
 	{
 		CBasePlayer* p = UTIL_PlayerByIndex(i);
 		if (!p || !p->IsAlive() || p->pev->deadflag != DEAD_NO)
+			continue;
+		if (spareMates && attacker && attacker->IsPlayer() && !g_pGameRules->FPlayerCanTakeDamage(p, attacker))
 			continue;
 		Vector feet = p->pev->origin;
 		feet.z += p->pev->mins.z;
@@ -346,7 +354,18 @@ void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker)
 		float mcDamage = (float)(int)((impact * impact + impact) / 2.0f * 7.0f * r2 + 1.0f);
 		p->pev->velocity = p->pev->velocity + dir * (impact * B2U * 20.0f);
 		McLog("explosion hurts %s: dist %.2f impact %.2f damage %.0f", STRING(p->pev->netname), d * r2, impact, mcDamage);
-		p->TakeDamage(att, att, mcDamage * mci::HP_PER_MC, DMG_BLAST);
+		// Counter-Strike flings a body killed by a blast along m_vBlastVector, which it takes from the
+		// inflictor and divides by its length. The inflictor here is no grenade: the vector is set from the
+		// middle of the blast, and the world is passed as inflictor so that it is left alone (with the
+		// attacker as inflictor a creeper, or somebody in their own TNT, got a zero vector and a body with
+		// a velocity that is not a number, which hangs the engine).
+		Vector blast = p->pev->origin - c;
+		if (blast.Length() < 1.0f)
+			blast = Vector(0, 0, 1);
+		p->m_vBlastVector = blast;
+		p->TakeDamage(VARS(INDEXENT(0)), att, mcDamage * mci::HP_PER_MC, DMG_BLAST);
+		if (!p->IsAlive() && attacker && attacker->IsPlayer() && attacker != p)
+			StoryTell(6.0f, "%s blew %s up", STRING(attacker->pev->netname), STRING(p->pev->netname));
 	}
 }
 } // namespace mc

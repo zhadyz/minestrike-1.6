@@ -15,7 +15,10 @@ import numpy as np
 from PIL import Image
 from scipy import ndimage
 
-GAMES = ['Z:/dev/CSminecraft/game/Half-Life/cstrike', 'Z:/dev/CSminecraft/game_test/Half-Life/cstrike']
+# the game copies beside the repository (wherever it lies); MINESTRIKE_CSTRIKE names one cstrike folder instead
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..')).replace(os.sep, '/')
+GAMES = [os.environ['MINESTRIKE_CSTRIKE'].replace(os.sep, '/')] if os.environ.get('MINESTRIKE_CSTRIKE') else [
+    f'{ROOT}/game/Half-Life/cstrike', f'{ROOT}/game_test/Half-Life/cstrike']
 SRC = GAMES[0]
 SIZE = 32
 
@@ -144,7 +147,8 @@ def main():
     for i, (name, im) in enumerate(sorted(outs.items())):
         big = im.resize((SIZE * 3, SIZE * 3), Image.NEAREST)
         sheet.alpha_composite(big, ((i % 8) * SIZE * 3, (i // 8) * SIZE * 3))
-    sheet.save('Z:/dev/scratch/csminecraft/gun_icons.png')
+    if os.path.isdir('Z:/dev/scratch/csminecraft'):  # (the contact sheet: for whoever works on the icons)
+        sheet.save('Z:/dev/scratch/csminecraft/gun_icons.png')
     print(f'{len(outs)} icons')
 
 

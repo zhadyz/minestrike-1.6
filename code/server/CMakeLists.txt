@@ -26,4 +26,4 @@ target_compile_options(mp PRIVATE /O2 /fp:precise /Zc:threadSafeInit- /EHsc /W1
 target_precompile_headers(mp PRIVATE "${RG}/regamedll/precompiled.h")
 set_source_files_properties(${SHARED_SRCS} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 target_link_libraries(mp PRIVATE "${RG}/lib/libacof32.lib" user32 ws2_32)
-target_link_options(mp PRIVATE /SAFESEH:NO)
+target_link_options(mp PRIVATE /SAFESEH:NO /MAP)

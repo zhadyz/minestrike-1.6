@@ -60,6 +60,7 @@ enum ShapeKind : uint8_t
 	SHAPE_PLATE,
 	SHAPE_REPEATER,
 	SHAPE_FIRE, // flames: no collision, not targeted (the crosshair goes through to what burns)
+	SHAPE_TABLE, // the enchanting table: three quarters of a block high
 };
 
 inline bool IsRedstoneShape(ShapeKind s) { return s >= SHAPE_DUST && s <= SHAPE_REPEATER; }
@@ -152,6 +153,10 @@ struct Trace
 //  - Point traces are mins = maxs = 0.
 void TraceBox(const World& w, const float start[3], const float end[3], const float mins[3], const float maxs[3],
 	Trace& out);
+
+// Block types (one byte each, by type id) that the collision queries go through as if the cell were empty.
+// Set for the length of one query and cleared again: a bullet through wool, a look through glass.
+extern const uint8_t* g_tracePass;
 
 // True if the box at 'origin' penetrates any solid voxel box (same tolerance as above).
 bool TestBox(const World& w, const float origin[3], const float mins[3], const float maxs[3]);

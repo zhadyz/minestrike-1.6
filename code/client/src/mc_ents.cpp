@@ -332,6 +332,7 @@ void EntDrawAll()
 			break;
 		}
 		case mcp::MCE_ARROW: DrawArrow(e); break;
+		case mcp::MCE_SKULL: DrawCubeAt(mcw::FindBlock("wither_skeleton_skull"), e->origin, 0.5f, mcp::EntDataOf(e->curstate.iuser4) ? 0.5f : 0.0f); break;
 		case mcp::MCE_PEARL: DrawThrown(e, "item/ender_pearl"); break;
 		case mcp::MCE_XPBOTTLE: DrawThrown(e, "item/experience_bottle"); break;
 		case mcp::MCE_FIREWORK:

@@ -8,6 +8,7 @@
 /tools/ninja/
 /tools/ghidra/
 build/
+!/tools/build/
 *.pyc
 __pycache__/
 /work/

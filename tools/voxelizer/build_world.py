@@ -33,15 +33,18 @@ import walkability as walk
 import watertight
 from bsp30 import Bsp30, load_wads
 
-GAME = r"Z:\dev\CSminecraft\game\Half-Life"
+# The repository, the game copy and the scratch folder: wherever the repository lies. MINESTRIKE_GAME names
+# another Half-Life folder, MINESTRIKE_SCRATCH another place for logs and previews.
+ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+GAME = os.environ.get("MINESTRIKE_GAME") or os.path.join(ROOT, "game", "Half-Life")
 BSP_IN = os.path.join(GAME, "cstrike", "maps", "de_dust2.bsp")
 OUT_DIR = os.path.join(GAME, "cstrike", "maps")
 OUT_MCW = os.path.join(OUT_DIR, "mc_dust2.mcw")
 OUT_JSON = os.path.join(OUT_DIR, "mc_dust2.json")
 OUT_BSP = os.path.join(OUT_DIR, "mc_dust2.bsp")
-REGISTRY = r"Z:\dev\CSminecraft\code\shared\mc_blocks.cpp"
+REGISTRY = os.path.join(ROOT, "code", "shared", "mc_blocks.cpp")
 TEXMAP = os.path.join(HERE, "texture_map.json")
-SCRATCH = r"Z:\dev\scratch\csminecraft\voxelizer"
+SCRATCH = os.path.join(os.environ.get("MINESTRIKE_SCRATCH") or (r"Z:\dev\scratch\csminecraft" if os.path.isdir(r"Z:\dev\scratch\csminecraft") else os.path.join(ROOT, "work")), "voxelizer")
 
 BLOCK = 40.0
 THRESH = 0.5            # half cell solid if >= this fraction of its samples is solid (+ watertight pass)
@@ -66,11 +69,14 @@ def parse_registry_full(path):
     import re
     src = open(path, encoding="utf-8").read()
     rows = re.findall(r'\{\s*"([a-z_0-9]+)",\s*(SHAPE_\w+),\s*(nullptr|"[a-z_0-9]+"),\s*(nullptr|"[a-z_0-9]+"),\s*(nullptr|"[a-z_0-9]+")', src)
-    shapes = {"SHAPE_NONE": 0, "SHAPE_CUBE": 1, "SHAPE_SLAB": 2, "SHAPE_STAIRS": 3, "SHAPE_DOOR": 4, "SHAPE_PANE": 5, "SHAPE_CROSS": 6}
+    # (as in mcw::ShapeKind, mc_world.h; a shape added there and not here counts as a plain part of no size)
+    shapes = {"SHAPE_NONE": 0, "SHAPE_CUBE": 1, "SHAPE_SLAB": 2, "SHAPE_STAIRS": 3, "SHAPE_DOOR": 4, "SHAPE_PANE": 5, "SHAPE_CROSS": 6,
+              "SHAPE_DUST": 7, "SHAPE_TORCH": 8, "SHAPE_LEVER": 9, "SHAPE_BUTTON": 10, "SHAPE_PLATE": 11, "SHAPE_REPEATER": 12,
+              "SHAPE_FIRE": 13, "SHAPE_TABLE": 14}
     defs = {}
     for n, s, t, si, b in rows:
         un = lambda x: None if x == "nullptr" else x.strip('"')
-        defs[n] = (shapes[s], un(t), un(si), un(b))
+        defs[n] = (shapes.get(s, 7), un(t), un(si), un(b))
     return defs
 
 

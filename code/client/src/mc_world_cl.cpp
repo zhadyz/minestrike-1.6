@@ -1033,20 +1033,39 @@ static void SurfaceOffset(int x, int y, int z, int attach, float off[3])
 		if (mcw::ShapeBoxes(g_w.ShapeAt(x + a[0], y + a[1], z + a[2]), mcw::CellState(sup), lb) > 0)
 			return;
 	}
+	// through the middle of the cell first; a leaning wall can pass beside it, so then the nearest hit of
+	// eight lines around it (the server's support test looks along the same lines, PartSupported)
 	float c[3] = {g_w.origin[0] + (x + 0.5f) * BS, g_w.origin[1] + (y + 0.5f) * BS, g_w.origin[2] + (z + 0.5f) * BS};
-	float s[3], e[3], zero[3] = {0, 0, 0};
-	for (int i = 0; i < 3; i++)
+	int u = a[0] ? 1 : 0, v = a[2] ? 1 : 2;
+	float best = 1e9f;
+	for (int n = 0; n < 9; n++)
 	{
-		s[i] = c[i] - a[i] * BS * 0.45f;
-		e[i] = c[i] + a[i] * BS * 1.0f;
+		static const int order[9][2] = {{0, 0}, {-1, 0}, {1, 0}, {0, -1}, {0, 1}, {-1, -1}, {1, -1}, {-1, 1}, {1, 1}};
+		float p[3] = {c[0], c[1], c[2]}, s[3], e[3], zero[3] = {0, 0, 0};
+		p[u] += order[n][0] * 12.0f;
+		p[v] += order[n][1] * 12.0f;
+		for (int i = 0; i < 3; i++)
+		{
+			s[i] = p[i] - a[i] * BS * 0.45f;
+			e[i] = p[i] + a[i] * BS * 1.5f;
+		}
+		mcc::Result r;
+		cl->Trace(s, e, zero, zero, r);
+		if (!r.hit || r.startsolid)
+			continue;
+		float d = 0.0f;
+		for (int i = 0; i < 3; i++)
+			if (a[i])
+				d = (r.endpos[i] - (c[i] + a[i] * BS * 0.5f)) * a[i];
+		if (d < best)
+		{
+			best = d;
+			for (int i = 0; i < 3; i++)
+				off[i] = a[i] ? a[i] * d / BS * 16.0f : 0.0f;
+		}
+		if (n == 0)
+			break; // the middle line found the wall
 	}
-	mcc::Result r;
-	cl->Trace(s, e, zero, zero, r);
-	if (!r.hit || r.startsolid)
-		return;
-	for (int i = 0; i < 3; i++)
-		if (a[i])
-			off[i] = (r.endpos[i] - (c[i] + a[i] * BS * 0.5f)) / BS * 16.0f;
 }
 
 static inline uint8_t C8(float v) { return (uint8_t)(v <= 0.0f ? 0 : v >= 1.0f ? 255 : v * 255.0f); }
@@ -1381,6 +1400,18 @@ static void MeshChunk(int cx, int cy, int cz, std::vector<Vtx>& out)
 				if (mcw::IsRedstoneShape(d.shape))
 				{
 					MeshRedstone(out, x, y, z, d, type, state);
+					continue;
+				}
+				if (d.shape == mcw::SHAPE_TABLE)
+				{
+					// the enchanting table, 12 px high, standing on the floor under it (on a classic map the
+					// floor is not on the grid: SurfaceOffset finds it)
+					float off[3];
+					SurfaceOffset(x, y, z, 0, off);
+					const BlockLayers& tl = g_blockLayers[type];
+					const int layers[6] = {tl.side, tl.side, tl.side, tl.side, tl.top, tl.bottom};
+					const float lo[3] = {0, 0, 0}, hi[3] = {16, 16, 12};
+					EmitPart(out, x, y, z, lo, hi, XfTrans(off[0], off[1], off[2]), layers, 0xFFFFFF, LightAt(x, y, z), false);
 					continue;
 				}
 				if (d.shape == mcw::SHAPE_FIRE)

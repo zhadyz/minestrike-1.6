@@ -1,4 +1,5 @@
 #include "mc_items.h"
+#include "mc_blocks.h"
 
 #include <math.h>
 #include <string.h>
@@ -133,6 +134,9 @@ const ItemDef g_items[] = {
 	BLOCKITEM("smooth_stone", "Smooth Stone"),
 	BLOCKITEM("andesite", "Andesite"),
 	BLOCKITEM("iron_block", "Block of Iron"),
+	BLOCKITEM("carved_pumpkin", "Carved Pumpkin"),
+	BLOCKITEM("soul_sand", "Soul Sand"),
+	BLOCKITEM("wither_skeleton_skull", "Wither Skeleton Skull"),
 	BLOCKITEM("gold_block", "Block of Gold"),
 	BLOCKITEM("diamond_block", "Block of Diamond"),
 	BLOCKITEM("glass", "Glass"),
@@ -143,6 +147,7 @@ const ItemDef g_items[] = {
 	BLOCKITEM("barrel", "Barrel"),
 	BLOCKITEM("crafting_table", "Crafting Table"),
 	BLOCKITEM("bookshelf", "Bookshelf"),
+	BLOCKITEM("enchanting_table", "Enchanting Table"),
 	BLOCKITEM("tnt", "TNT"),
 	BLOCKITEM("obsidian", "Obsidian"),
 	BLOCKITEM("glowstone", "Glowstone"),
@@ -194,6 +199,110 @@ int ItemIdAt(int index)
 	if (index < g_numItems - 1)
 		return index + 1;
 	return DYN_ITEM_BASE + (index - (g_numItems - 1));
+}
+
+// The price list, in Counter-Strike dollars for one of the item. Set against what Counter-Strike charges
+// for comparable power: kevlar and a helmet are $1000, an AK-47 $2500, a Desert Eagle $650. A full iron set
+// (75% off bullets) is $1000, diamond (90%) $1800, netherite (99%) $2800, shared over the pieces by how
+// much of the set's protection each gives. Swords and axes run from $100 (wooden) to $800 (netherite).
+int Price(int id)
+{
+	if (!ValidItem(id))
+		return 0;
+	const ItemDef& d = Item(id);
+	const char* n = d.name;
+	auto has = [&](const char* prefix) { return !strncmp(n, prefix, strlen(prefix)); };
+	// wooden, stone, golden, iron, diamond, netherite
+	auto tier = [&](int wood, int stone, int gold, int iron, int diamond, int netherite) {
+		return has("wooden_") ? wood : has("stone_") ? stone : has("golden_") ? gold : has("diamond_") ? diamond : has("netherite_") ? netherite : iron;
+	};
+	switch (d.type)
+	{
+	case IT_SWORD:
+	case IT_AXE:
+		return tier(100, 150, 150, 300, 500, 800);
+	case IT_PICKAXE:
+	case IT_SHOVEL:
+		return tier(50, 100, 100, 200, 350, 500);
+	case IT_MACE:
+		return 900;
+	case IT_ARMOR:
+	{
+		int set = has("leather_") ? 300 : has("golden_") ? 500 : has("chainmail_") ? 700 : has("diamond_") ? 1800 : has("netherite_") ? 2800 : has("turtle_") ? 1000 : 1000;
+		static const float share[4] = {0.15f, 0.40f, 0.30f, 0.15f}; // head, chest, legs, feet (ArmorReduction's shares)
+		return (int)(set * share[d.armorSlot < 4 ? d.armorSlot : 0] / 10.0f + 0.5f) * 10;
+	}
+	case IT_ELYTRA:
+		return 1000;
+	case IT_FIREWORK:
+		return 25;
+	case IT_TOTEM:
+		return 1200;
+	case IT_BOW:
+		return 400;
+	case IT_CROSSBOW:
+		return 650;
+	case IT_ARROW:
+		return 5;
+	case IT_PEARL:
+		return 200;
+	case IT_XP_BOTTLE:
+		return 30;
+	case IT_FLINT_STEEL:
+		return 150;
+	case IT_FOOD:
+		return has("enchanted_golden_apple") ? 800 : has("golden_apple") ? 250 : has("golden_carrot") ? 40 : 15;
+	case IT_BLOCK:
+	{
+		if (!strcmp(n, "tnt"))
+			return 2000;
+		if (!strcmp(n, "enchanting_table"))
+			return 400;
+		// the head of an iron golem: with four iron blocks at $300 the build comes to $3500, a rifle and armor
+		if (!strcmp(n, "carved_pumpkin"))
+			return 2300;
+		// a wither: four soul sand and three skulls, $16000, all the money a player can hold
+		if (!strcmp(n, "soul_sand"))
+			return 250;
+		if (!strcmp(n, "wither_skeleton_skull"))
+			return 5000;
+		// Blocks are dear: one set down is cover, a wall, a step or a bridge, and it stands for the round. A
+		// full block costs by what it stops. What a pickaxe is for stops every bullet: $200, the harder ones
+		// $300, obsidian (which TNT does not move either) $800. What an axe is for stops pistols and
+		// submachine guns but not rifles, and it burns: $100. The rest (wool, glass, sand, hay) stops no
+		// bullet at all: $50, for hiding behind, for an alarm, for a door that drops. The small things
+		// (plants, torches, redstone parts) cost next to nothing.
+		int type = d.blockName ? mcw::FindBlock(d.blockName) : -1;
+		if (type < 0)
+			return 200;
+		const mcw::BlockDef& b = mcw::Block((uint16_t)type);
+		const bool stone = b.tool == mcw::TOOL_PICKAXE, wood = b.tool == mcw::TOOL_AXE;
+		const int cube = stone ? (b.hardness < 3.0f ? 200 : 300) : wood ? 100 : 50;
+		switch (b.shape)
+		{
+		case mcw::SHAPE_CUBE:
+			if (b.hardness < 0.0f)
+				return 16000; // (nothing breaks it)
+			if (!strcmp(n, "obsidian"))
+				return 800;
+			return cube;
+		case mcw::SHAPE_SLAB:
+			return stone ? 100 : 50;
+		case mcw::SHAPE_STAIRS:
+			return stone ? 150 : 75;
+		case mcw::SHAPE_PANE:
+			return 150; // iron bars: to see and shoot through, not to walk through
+		case mcw::SHAPE_DOOR:
+			return stone ? 300 : 150; // an iron door opens to redstone only, a wooden one to anybody
+		default:
+			return 5;
+		}
+	}
+	case IT_MATERIAL:
+		return 5;
+	default:
+		return 10;
+	}
 }
 
 int FindItem(const char* name)

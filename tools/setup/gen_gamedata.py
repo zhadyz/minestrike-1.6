@@ -51,13 +51,19 @@ def main():
     shell = os.path.join(maps, 'mc_dust2.bsp')
     if os.path.exists(shell):
         shutil.copyfile(shell, os.path.join(maps, 'de_dust2_mc.bsp'))
-        nav = bytearray(open(os.path.join(maps, 'de_dust2.nav'), 'rb').read())
-        magic, version = struct.unpack_from('<II', nav, 0)
-        if magic != 0xFEEDFACE or version < 4:
-            sys.exit('unexpected de_dust2.nav format')
-        struct.pack_into('<I', nav, 8, os.path.getsize(os.path.join(maps, 'de_dust2_mc.bsp')))  # bsp size stamp
-        open(os.path.join(maps, 'de_dust2_mc.nav'), 'wb').write(nav)
-        print('maps: de_dust2_mc.bsp, de_dust2_mc.nav')
+        src = os.path.join(maps, 'de_dust2.nav')
+        if os.path.exists(src):
+            nav = bytearray(open(src, 'rb').read())
+            magic, version = struct.unpack_from('<II', nav, 0)
+            if magic != 0xFEEDFACE or version < 4:
+                sys.exit('unexpected de_dust2.nav format')
+            struct.pack_into('<I', nav, 8, os.path.getsize(os.path.join(maps, 'de_dust2_mc.bsp')))  # bsp size stamp
+            open(os.path.join(maps, 'de_dust2_mc.nav'), 'wb').write(nav)
+            print('maps: de_dust2_mc.bsp, de_dust2_mc.nav')
+        else:
+            # Counter-Strike has no bot navigation of its own: the bots work de_dust2 out the first time it is
+            # played with them (the installer has them do it on a hidden server), and this is run again after
+            print('maps: de_dust2_mc.bsp; no maps/de_dust2.nav yet, so no de_dust2_mc.nav (run this again once it exists)')
     else:
         print('maps: skipped (build maps/mc_dust2.bsp with tools/voxelizer first)')
     ov = os.path.join(cs, 'overviews')

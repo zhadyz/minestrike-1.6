@@ -38,6 +38,8 @@ struct McPlayer
 	// on fire (mc_fire.cpp): alight until fireUntil, hurt again at fireNext, the kill goes to fireOwner
 	float fireUntil = 0.0f, fireNext = 0.0f, fireFlames = 0.0f;
 	int fireOwner = 0;
+	bool meleeSpeed = false; // the 5% speed of a melee Minecraft weapon is applied
+	int killer = 0;          // player index of who killed this player last (0: nobody), for the experience
 	// armor wear is charged once per Minecraft invulnerability window, not once per bullet
 	float armorWearUntil = 0.0f;
 	int armorWearDone = 0; // wear already charged in the open window
@@ -100,7 +102,7 @@ void OnUpdateClientData(const edict_t* ent, struct clientdata_s* cd);
 
 // ---------------------------------------------------------------------------------------------
 // Inventory / items
-bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup = false, int damage = 0);
+bool GiveItem(CBasePlayer* pl, int itemId, int count, bool announce, bool pickup = false, int damage = 0, int ench = 0);
 // survival inventory (mc_inventory.cpp)
 void InventoryClick(CBasePlayer* pl, int slot, int button, bool shift);
 void InventoryDrop(CBasePlayer* pl, int slot, bool all);
@@ -108,6 +110,7 @@ void InventoryClose(CBasePlayer* pl);
 void DropEverything(CBasePlayer* pl);
 void ThrowStack(CBasePlayer* pl, const mci::Stack& s, bool scatter);
 void SetItemDamage(CBaseEntity* item, int damage);
+void SetItemEnchant(CBaseEntity* item, int ench);
 // hunger (mc_hunger.cpp)
 bool CanEat(CBasePlayer* pl, int itemId);
 void EatFood(CBasePlayer* pl, int itemId);
@@ -150,8 +153,10 @@ extern mcw::World g_world;
 extern bool g_worldLoaded;
 void SetBlock(int x, int y, int z, mcw::Cell c, bool broadcast = true);
 void BreakBlock(int x, int y, int z, CBasePlayer* by, bool drop);
-void Explode(const float* origin, float power, CBaseEntity* source, CBaseEntity* attacker = nullptr);
-void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker);
+// spareMates: the blast is the attacker's the way a grenade is its thrower's: with mp_friendlyfire off it
+// does nothing to the attacker's team (TNT a player lit)
+void Explode(const float* origin, float power, CBaseEntity* source, CBaseEntity* attacker = nullptr, bool spareMates = false);
+void ExplosionHurt(const float* origin, float power, CBaseEntity* attacker, bool spareMates = false);
 // redstone (mc_redstone.cpp)
 void RedstoneRescan();
 void RedstoneCellChanged(int x, int y, int z, mcw::Cell c);
@@ -197,7 +202,9 @@ enum Mob
 	MOB_HUSK,
 	MOB_DROWNED,
 	MOB_CREEPER,
-	MOB_ENDERMAN
+	MOB_ENDERMAN,
+	MOB_GOLEM, // the team mobs (mc_mobs.cpp)
+	MOB_WITHER
 };
 Mob MobOf(CBasePlayer* pl);
 int MobHurtSound(CBasePlayer* pl);
@@ -209,6 +216,89 @@ void CreeperSpawn(CBasePlayer* pl);
 bool CreeperRestrictsItem(CBasePlayer* pl, int item);
 void CreeperFrame();
 bool EndermanDodge(CBasePlayer* pl, CBaseEntity* inflictor, CBaseEntity* attacker, int bits);
+
+// the economy and the standing of Minecraft weapons (mc_economy.cpp)
+void EconomyInit();
+bool EconomyOn(CBasePlayer* pl);                                      // does this player pay for items?
+int BuyItem(CBasePlayer* pl, int itemId, int count, bool announce);  // how many the player got
+bool BuyKit(CBasePlayer* pl, const char* const* items, const int* counts, int num, const char* name, bool free = false);
+float McWeaponScale();
+bool HoldsMcWeapon(CBasePlayer* pl);
+bool HoldsMcMelee(CBasePlayer* pl);
+
+// enchanting (mc_enchant_srv.cpp)
+void EnchantInit();
+void SendEnchants(CBasePlayer* pl);
+void EnchantOpen(CBasePlayer* pl, int x, int y, int z); // right-click on an enchanting table
+bool EnchantMenuSelect(CBasePlayer* pl, int menu, int key);
+bool EnchantCommand(CBasePlayer* pl, const char* cmd); // the enchanting screen's clicks (mc_ench_*)
+int BookshelvesAround(int x, int y, int z);
+float EnchantMeleeBonus(const mci::Stack& held);       // Sharpness, in Minecraft damage points
+float EnchantProtection(CBasePlayer* pl);              // Protection worn: the share taken off any damage
+bool EnchantWears(const mci::Stack& s, bool armor);    // Unbreaking: does this use cost durability?
+void EnchantIgnite(CBaseEntity* victim, CBasePlayer* by, float seconds); // Fire Aspect, Flame
+bool BotEnchant(CBasePlayer* bot, mci::Stack* gear[], int numGear);
+
+// bots with blocks and TNT, and what they learn (mc_bottactics.cpp)
+void BotTacticsInit();
+void BotTacticsSpawn(CBasePlayer* bot);
+void BotTacticsThink(CBasePlayer* bot);       // from PreThink
+void BotTacticsFrame();                       // from StartFrame
+void BotTacticsRoundRestart();
+void BotTacticsMapEnd();
+// Team mobs (mc_mobs.cpp): the iron golem, built by a player, fighting for his side
+enum TeamMobKind
+{
+	TM_NONE,
+	TM_GOLEM,
+	TM_WITHER
+};
+bool IsMobBot(CBasePlayer* pl);
+int TeamMobOf(CBasePlayer* pl);
+void TeamMobsInit();
+void TeamMobRequest(int kind, int team, const Vector& feet, float yaw, CBasePlayer* by); // made at the start of the next frame
+void TeamMobSpawned(CBasePlayer* pl);
+bool TeamMobPreThink(CBasePlayer* pl);
+bool TeamMobDamage(CBasePlayer* victim, CBaseEntity* inflictor, CBaseEntity* attacker, float& damage, int bits);
+bool TeamMobSwings(CBasePlayer* pl);
+bool TeamMobBullet(CBasePlayer* victim, entvars_t* attacker, float damage, TraceResult* tr, int bits); // true: it does nothing to it
+bool BotIgnoresThreat(CBasePlayer* bot, CBasePlayer* other); // an iron golem, to a bot without a sword
+bool BotHasSword(CBasePlayer* bot);                          // mc_botgear.cpp
+bool WasBulletOf(entvars_t* shooter);                        // mc_world_srv.cpp: the hit being dealt now is that player's bullet
+void TeamMobFrame();
+void TeamMobDisconnect(int index);
+void TeamMobsRemove();
+int TeamMobsAlive(int team, int kind);
+int GolemLimit();
+Vector BotWish(CBasePlayer* bot);                                   // mc_bottactics.cpp: where its own AI wants to go (units a second)
+bool GolemSeenLately(int team);                                    // the other side had an iron golem about, this round or the two before
+bool WitherAllowed(int team);                                      // none standing, and its side's wait since the last one is over
+void WitherEffect(CBasePlayer* victim, CBasePlayer* by);          // Minecraft's Wither effect: it eats health for ten seconds
+CBaseEntity* SpawnSkull(CBasePlayer* owner, const Vector& from, const Vector& dir, bool blue); // mc_entities.cpp
+int WitherBreaks(const Vector& origin, CBasePlayer* by);          // mc_world_srv.cpp: the blocks around a hurt wither go
+void ExplodeThroughAll(const float* origin, float power, CBaseEntity* attacker); // mc_world_srv.cpp: a blue skull's blast
+bool TryBuildMob(int x, int y, int z, CBasePlayer* pl); // mc_world_srv.cpp: the block just set down completes a mob
+CGrenade* PlantedBombEnt();                              // mc_world_srv.cpp: the planted bomb, if there is one
+int TacticsExpectedSite();                               // mc_bottactics.cpp: the bomb site the Terrorists are expected at (-1: no idea)
+void StoryTell(float weight, const char* fmt, ...); // something worth telling when the round is over (mc_bottactics.cpp)
+bool BotTacticsCommand(CBasePlayer* pl, const char* cmd); // mc_brain
+void BotControlMove(struct playermove_s* pm); // before a bot's move is run
+void BotLook(CBasePlayer* bot, const Vector& viewAngles); // where a bot looks this frame (pitch down positive)
+// ... and the world's side of it (mc_world_srv.cpp, mc_entities.cpp)
+bool IsPlacedBlock(int x, int y, int z);      // a block somebody set down (not the map)
+int BlockOwner(int x, int y, int z);          // the side of whoever set it down (0: nobody's)
+bool BombKeepsFree(int x, int y, int z);      // a cell beside a planted bomb: no block may go there
+void BombClearsSpace(CGrenade* bomb);         // the bomb has just been planted: what stands against it comes down
+int BlockBulletClass(const char* blockName);  // 0 stops every bullet, 1 the guns that go through walls pass, 2 stops none
+bool H_IsPenetrable(IReGameHook_IsPenetrableEntity* chain, Vector& src, Vector& end, entvars_t* attacker, edict_t* hit);
+bool CellTakesBlock(int x, int y, int z);     // could a block be set down in this cell?
+Vector CellCenter(int x, int y, int z);
+bool BotPlaceBlock(CBasePlayer* bot, int x, int y, int z); // the block in its hand
+bool BotLightTnt(CBasePlayer* bot, int x, int y, int z);   // with the flint and steel in its hand
+void MineFrame(CBasePlayer* pl, bool holding, const int* forced = nullptr, bool mapToo = false);
+bool BotPlacePlate(CBasePlayer* bot, int x, int y, int z); // a pressure plate from its hand onto the block below
+CBasePlayer* BlockPlacer(int x, int y, int z);              // who set the block down (nullptr: gone, or nobody)
+void PrimeTntBy(const float* origin, int fuse, CBasePlayer* by);
 
 // hit boxes of players drawn as Minecraft models (mc_hitbox.cpp)
 void HitRigsInit();
@@ -231,4 +321,17 @@ void McItemFrame(CBasePlayer* pl);
 
 // Logging to <cstrike>/logs/mc_server.log
 void McLog(const char* fmt, ...);
+
+// Where the mod's code is right now, for the watchdog of test runs (mc_main.cpp): when a frame does not end,
+// the innermost of these names is what hangs.
+extern const char* volatile g_mcWhere;
+struct McWhere
+{
+	const char* prev;
+	McWhere(const char* w) : prev(g_mcWhere) { g_mcWhere = w; }
+	~McWhere() { g_mcWhere = prev; }
+};
+#define MC_WHERE_CAT2(a, b) a##b
+#define MC_WHERE_CAT(a, b) MC_WHERE_CAT2(a, b)
+#define MC_WHERE(name) mc::McWhere MC_WHERE_CAT(mcWhere_, __LINE__)(name)
 } // namespace mc

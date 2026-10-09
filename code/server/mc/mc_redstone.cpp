@@ -418,7 +418,7 @@ static void Tick()
 			{
 				Vector o = Center(x, y, z) - Vector(0, 0, 20);
 				changes.push_back({x, y, z, Emptied(c)});
-				PrimeTnt(o, 80);
+				PrimeTntBy(o, 80, BlockPlacer(x, y, z)); // (whoever set it down: his blast, his kills)
 				McLog("redstone: TNT ignited at %d %d %d", x, y, z);
 			}
 		}

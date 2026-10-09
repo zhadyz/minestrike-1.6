@@ -39,9 +39,12 @@ static const Character kCharacters[] = {
 	{"leet", "Elite Crew", "leet", nullptr},
 	{"arctic", "Arctic Avengers", "arctic", nullptr},
 	{"guerilla", "Guerilla Warfare", "guerilla", nullptr},
+	// the team mobs (mc_mobs.cpp): nobody chooses these, a mob is given its own
+	{"iron_golem", "Iron Golem", nullptr, "entity/iron_golem/iron_golem"},
+	{"wither", "Wither", nullptr, "entity/wither/wither"},
 };
 static const int kNumCharacters = (int)(sizeof(kCharacters) / sizeof(kCharacters[0]));
-static const int CHAR_FIRST_MC = 1, CHAR_FIRST_SKIN = 8, CHAR_FIRST_CS = 15;
+static const int CHAR_FIRST_MC = 1, CHAR_FIRST_SKIN = 8, CHAR_FIRST_CS = 15, CHAR_FIRST_MOB = 23;
 
 inline bool IsMinecraftCharacter(int c) { return c > 0 && c < kNumCharacters && kCharacters[c].skin != nullptr; }
 } // namespace mcp

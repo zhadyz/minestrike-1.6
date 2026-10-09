@@ -69,6 +69,20 @@ int BspTextureOf(const char* tex); // miptex index, or -1 for a regular Minecraf
 
 void InitBlockRegistry();
 int FindBlock(const char* name); // -1 if unknown
+
+// What a bullet does at a block (the rules are the server's, mc_world_srv.cpp; the shop's tooltips say it):
+// what a pickaxe is for stops every bullet; what an axe is for stops pistols and submachine guns, and the
+// guns that go through walls go through it; glass shatters; the rest lets every bullet through. On a
+// classic map that includes what a shovel is for; on a block map the ground itself is sand, and stops them.
+enum BulletClass
+{
+	BULLET_STOPS,
+	BULLET_WOOD,
+	BULLET_PASSES,
+	BULLET_SHATTERS,
+	BULLET_BARS
+};
+int BulletClassOf(const BlockDef& d, bool classicMap);
 inline const BlockDef& Block(uint16_t type)
 {
 	if (type >= DYN_BLOCK_BASE && type < DYN_BLOCK_BASE + g_numDynBlocks)

@@ -362,6 +362,8 @@ static void W_PlaySound(int channel, const char* sample, float volume, float att
 		if (c)
 		{
 			const mcw::BlockDef& d = mcw::Block(mcw::CellType(c));
+			if (d.sound == mcw::SOUND_WOOL)
+				return; // wool underfoot makes no sound: a quiet way laid across a floor
 			const mcs::SoundEvent& ev = mcs::g_sounds[mcs::MCS_BLOCK_BASE + d.sound * 4 + 3];
 			int n = ev.numVariants;
 			int k = (n > 1 && g_pm->RandomLong) ? g_pm->RandomLong(0, n - 1) : 0;

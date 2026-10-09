@@ -86,6 +86,18 @@ EVENTS = [
     ('FLINT_USE', 'item.flintandsteel.use'),
     ('FIRE_AMBIENT', 'block.fire.ambient'),
     ('PLAYER_HURT_FIRE', 'entity.player.hurt_on_fire'),
+    ('ENCHANT', 'block.enchantment_table.use'),
+    # the team mobs (mc_mobs.cpp)
+    ('IRON_GOLEM_ATTACK', 'entity.iron_golem.attack'),
+    ('IRON_GOLEM_HURT', 'entity.iron_golem.hurt'),
+    ('IRON_GOLEM_DEATH', 'entity.iron_golem.death'),
+    ('IRON_GOLEM_STEP', 'entity.iron_golem.step'),
+    ('WITHER_SPAWN', 'entity.wither.spawn'),
+    ('WITHER_AMBIENT', 'entity.wither.ambient'),
+    ('WITHER_SHOOT', 'entity.wither.shoot'),
+    ('WITHER_HURT', 'entity.wither.hurt'),
+    ('WITHER_DEATH', 'entity.wither.death'),
+    ('WITHER_BREAK_BLOCK', 'entity.wither.break_block'),
 ]
 # Block sound groups, in the order of mcw::SOUND_* in mc_blocks.h
 GROUPS = ['stone', 'wood', 'sand', 'gravel', 'grass', 'glass', 'metal', 'wool']
